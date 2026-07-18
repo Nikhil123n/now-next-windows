@@ -240,7 +240,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         'pull_request:',
         'validation:',
         'runs-on: windows-latest',
-        'actions/checkout@v6',
+        'actions/checkout@v7',
         'actions/setup-dotnet@v5',
         'global-json-file: global.json',
         'cache-dependency-path: ''**/packages.lock.json''',
