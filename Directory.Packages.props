@@ -1,9 +1,12 @@
 <Project>
-  <!-- Approved baselines only. Prompt 1 contains no consuming project. -->
+  <!-- Current dependencies and approved future baselines are pinned here. -->
   <ItemGroup>
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
+    <PackageVersion Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.4.0" />
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <PackageVersion Include="MSTest" Version="4.3.2" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,6 @@
 # 0001 — Windows-native project shape
 
-- Status: Accepted
+- Status: Superseded by [0004 — App-owned SQLite persistence](0004-app-owned-sqlite-persistence.md)
 - Date: 2026-07-18
 
 ## Context

@@ -8,3 +8,4 @@ history to hide an earlier choice.
 - [0001 — Windows-native project shape](0001-windows-native-project-shape.md)
 - [0002 — Authoritative time and recovery](0002-authoritative-time-and-recovery.md)
 - [0003 — SQLite persistence and migrations](0003-sqlite-persistence-and-migrations.md)
+- [0004 — App-owned SQLite persistence](0004-app-owned-sqlite-persistence.md)
