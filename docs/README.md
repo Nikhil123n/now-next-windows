@@ -26,11 +26,16 @@ approved subject to Windows Reduced Motion accessibility behavior.
   shared verification implementation.
 - [Prompt 3 domain and SQLite plan](plans/prompt-3-today-domain-and-sqlite.md) — Today
   model, local persistence, and verification record.
+- [Prompt 4 authoritative timer plan](plans/prompt-4-authoritative-timer-state-machine.md)
+  — completed implementation scope and verification record.
+- [Timer invariants](timer-invariants.md) — authoritative elapsed-time, transition,
+  boundary, and recovery rules.
 - [SQLite schema](sqlite-schema.md) — current migration and retention contract.
 - [Testing strategy](testing/README.md) — verification layers and required scenarios.
 
 ## Current phase
 
-Prompt 3 contains the immutable Today planning model and App-owned, versioned SQLite
-storage for the current local day. The packaged app still shows only its readiness shell;
-task UI, focus timing, repair, history, and deferred features remain unimplemented.
+Prompt 4 adds the pure authoritative focus-session state machine and one durable recovery
+checkpoint to the existing Today model and App-owned SQLite storage. The packaged app
+still shows only its readiness shell; task/timer UI, schedule repair, session history,
+and deferred features remain unimplemented.

@@ -1,9 +1,14 @@
 # SQLite Schema
 
-Prompt 3 introduces schema version 1 for the current local working day only. The
-authoritative migration is
+The current schema has two ordered versions. Prompt 3 introduced version 1 for the
+current local working day. Prompt 4 preserves that migration and adds version 2 for one
+durable current focus-session checkpoint; it does not add session history.
+
+The authoritative version 1 migration is
 [`0001_initial_today_plan.sql`](../src/NowNext.App/Persistence/Migrations/0001_initial_today_plan.sql).
-Once committed to `main`, it must not be edited; later changes use a new ordered
+The authoritative version 2 migration is
+[`0002_current_focus_session_checkpoint.sql`](../src/NowNext.App/Persistence/Migrations/0002_current_focus_session_checkpoint.sql).
+Once committed to `main`, a migration must not be edited; later changes use a new ordered
 migration.
 
 ## Storage location and connection rules
@@ -32,10 +37,35 @@ Deleting today's task removes its schedule entry, compacts remaining positions, 
 stamps the task row; it never physically deletes the row. This preserves a stable target
 for later session-history work without adding a history table in this milestone.
 
+## Version 2 current-session checkpoint
+
+Version 2 adds `current_session_checkpoint`, a single-row table whose fixed slot is `1`,
+rather than an append-only event or history model. The record preserves the minimum
+durable state required to restore a session safely:
+
+- session and task identity;
+- timing mode, original planned duration, and current approved limit;
+- committed focus, Landing, and Break durations;
+- the durable session state and its state-specific recovery context;
+- relevant invariant UTC timestamps; and
+- the parked next physical action only when that state requires it.
+
+The session's task reference uses `ON DELETE RESTRICT`. Production task deletion remains
+soft deletion and is rejected while the task owns an unresolved current session. Duration
+checks reject negative committed values, nonpositive planned/approved limits, approved
+limits shorter than the original plan, and Landing duration beyond either committed
+active time or five minutes. Text checks restrict persisted state and timing values to
+the Core contract and require state-specific values only in the states that own them.
+
+No process-local monotonic timestamp is durable. A running checkpoint loaded after a
+process loss or suspension becomes RecoveryRequired; the new process starts a fresh
+monotonic segment from committed duration. Session checkpoint and corresponding task
+lifecycle changes commit in the same explicit transaction.
+
 ## Migration safety
 
-Initialization creates the migration registry and applies missing migrations in one
-transaction. Unknown, renamed, or non-contiguous applied versions stop initialization.
+Initialization creates the migration registry and applies missing migrations in order in
+one transaction. Unknown, renamed, or non-contiguous applied versions stop initialization.
 A DDL conflict rolls back both the failed migration and the registry change. Tests cover
-fresh version 0 to version 1, repeat initialization, rollback, future versions, and
-foreign-key integrity.
+fresh version 0 to version 2, retained version 1 to version 2, repeat initialization,
+rollback, future versions, checkpoint/task foreign keys, and corrupt checkpoint data.

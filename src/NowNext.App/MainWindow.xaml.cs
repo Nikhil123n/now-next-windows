@@ -12,4 +12,11 @@ public sealed partial class MainWindow : Window
         StatusText.Text = statusMessage;
         AutomationProperties.SetName(StatusText, statusMessage);
     }
+
+    internal void SetStatus(string statusMessage)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(statusMessage);
+        StatusText.Text = statusMessage;
+        AutomationProperties.SetName(StatusText, statusMessage);
+    }
 }

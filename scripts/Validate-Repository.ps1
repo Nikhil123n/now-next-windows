@@ -78,7 +78,9 @@ $requiredFiles = @(
     'docs\plans\PLAN_TEMPLATE.md',
     'docs\plans\prompt-2-application-scaffold.md',
     'docs\plans\prompt-3-today-domain-and-sqlite.md',
+    'docs\plans\prompt-4-authoritative-timer-state-machine.md',
     'docs\sqlite-schema.md',
+    'docs\timer-invariants.md',
     'docs\testing\README.md',
     'scripts\Database-Dev.ps1',
     'scripts\Verify.ps1',
@@ -89,12 +91,15 @@ $requiredFiles = @(
     'src\NowNext.App\Assets\Square150x150Logo.scale-200.png',
     'src\NowNext.App\Assets\Square44x44Logo.scale-200.png',
     'src\NowNext.App\Assets\StoreLogo.png',
+    'src\NowNext.App\FocusSessionRuntime.cs',
     'src\NowNext.App\MainWindow.xaml',
     'src\NowNext.App\MainWindow.xaml.cs',
     'src\NowNext.App\NowNext.App.csproj',
     'src\NowNext.App\Package.appxmanifest',
     'src\NowNext.App\Persistence\Migrations\0001_initial_today_plan.sql',
+    'src\NowNext.App\Persistence\Migrations\0002_current_focus_session_checkpoint.sql',
     'src\NowNext.App\Persistence\TodayPlanStorageException.cs',
+    'src\NowNext.App\Persistence\TodayPlanStore.Sessions.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.cs',
     'src\NowNext.App\app.manifest',
     'src\NowNext.App\packages.lock.json',
@@ -107,13 +112,25 @@ $requiredFiles = @(
     'src\NowNext.Core\Domain\TaskState.cs',
     'src\NowNext.Core\Domain\TimingMode.cs',
     'src\NowNext.Core\Domain\TodayPlan.cs',
+    'src\NowNext.Core\Sessions\FocusSession.cs',
+    'src\NowNext.Core\Sessions\FocusSessionMachine.cs',
+    'src\NowNext.Core\Sessions\SessionCheckpoint.cs',
+    'src\NowNext.Core\Sessions\SessionCommands.cs',
+    'src\NowNext.Core\Sessions\SessionTypes.cs',
+    'src\NowNext.Core\Sessions\SessionView.cs',
     'src\NowNext.Core\packages.lock.json',
     'tests\NowNext.Core.Tests\CoreAssemblySmokeTests.cs',
     'tests\NowNext.Core.Tests\Domain\TaskTests.cs',
     'tests\NowNext.Core.Tests\Domain\TodayPlanTests.cs',
     'tests\NowNext.Core.Tests\NowNext.Core.Tests.csproj',
     'tests\NowNext.Core.Tests\Persistence\MigrationTests.cs',
+    'tests\NowNext.Core.Tests\Persistence\CurrentSessionStoreTests.cs',
     'tests\NowNext.Core.Tests\Persistence\TodayPlanStoreTests.cs',
+    'tests\NowNext.Core.Tests\Runtime\FocusSessionRuntimeTests.cs',
+    'tests\NowNext.Core.Tests\Sessions\FocusSessionMachineTests.cs',
+    'tests\NowNext.Core.Tests\Sessions\SessionRecoveryTests.cs',
+    'tests\NowNext.Core.Tests\Sessions\SessionTestClock.cs',
+    'tests\NowNext.Core.Tests\Sessions\SessionTransitionMatrixTests.cs',
     'tests\NowNext.Core.Tests\TestSupport.cs',
     'tests\NowNext.Core.Tests\packages.lock.json'
 )
@@ -133,8 +150,11 @@ $requiredDirectories = @(
     'docs\testing',
     'src\NowNext.App\Persistence\Migrations',
     'src\NowNext.Core\Domain',
+    'src\NowNext.Core\Sessions',
     'tests\NowNext.Core.Tests\Domain',
     'tests\NowNext.Core.Tests\Persistence',
+    'tests\NowNext.Core.Tests\Runtime',
+    'tests\NowNext.Core.Tests\Sessions',
     'src\NowNext.App',
     'src\NowNext.Core',
     'tests\NowNext.Core.Tests'
@@ -382,24 +402,30 @@ if ($sqlitePackageOwners.Count -ne 1 -or
     Add-ValidationError 'Microsoft.Data.Sqlite must be referenced only by NowNext.App.'
 }
 
+$expectedMigrations = @(
+    '0001_initial_today_plan.sql',
+    '0002_current_focus_session_checkpoint.sql'
+)
 $migrationFiles = @(Get-ChildItem -LiteralPath (
-        Join-Path $repositoryRoot 'src\NowNext.App\Persistence\Migrations') -File -Filter '*.sql')
-if ($migrationFiles.Count -ne 1 -or $migrationFiles[0].Name -ne '0001_initial_today_plan.sql') {
-    Add-ValidationError 'Prompt 3 must contain exactly the version 1 Today-plan migration.'
+        Join-Path $repositoryRoot 'src\NowNext.App\Persistence\Migrations') -File -Filter '*.sql' |
+    ForEach-Object { $_.Name } |
+    Sort-Object)
+foreach ($difference in @(Compare-Object $expectedMigrations $migrationFiles)) {
+    Add-ValidationError "Prompt 4 migration mismatch: $($difference.InputObject)"
 }
 
 $documentationRequirements = @{
-    'AGENTS.md' = 'Prompt 3 permits only today''s domain and persistence foundation'
-    'ARCHITECTURE.md' = 'SQLitePCLRaw.bundle_e_sqlite3'
-    'SCOPE.md' = '## Prompt 3 boundary'
-    'docs\sqlite-schema.md' = 'ON DELETE RESTRICT'
-    'docs\decisions\0004-app-owned-sqlite-persistence.md' = 'App-owned SQLite persistence'
+    'AGENTS.md' = 'Prompt 4'
+    'ARCHITECTURE.md' = 'authoritative session state machine'
+    'SCOPE.md' = '## Prompt 4 boundary'
+    'docs\sqlite-schema.md' = 'current_session_checkpoint'
+    'docs\timer-invariants.md' = 'RecoveryRequired'
 }
 foreach ($requirement in $documentationRequirements.GetEnumerator()) {
     $path = Join-Path $repositoryRoot $requirement.Key
     if ((Test-Path -LiteralPath $path -PathType Leaf) -and
         -not (Get-Content -LiteralPath $path -Encoding UTF8 -Raw).Contains($requirement.Value)) {
-        Add-ValidationError "$($requirement.Key) is missing Prompt 3 documentation: $($requirement.Value)"
+        Add-ValidationError "$($requirement.Key) is missing Prompt 4 documentation: $($requirement.Value)"
     }
 }
 
@@ -427,5 +453,5 @@ if ($errors.Count -gt 0) {
 }
 
 Write-Host "PASS: repository specification validated at $repositoryRoot" -ForegroundColor Green
-Write-Host '      Required files, authoritative hashes/references, links, policies, and Prompt 3 project boundaries are valid.'
+Write-Host '      Required files, authoritative hashes/references, links, policies, and Prompt 4 project boundaries are valid.'
 Write-Host '      The solution contains exactly two production projects and one test project.'
