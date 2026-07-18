@@ -39,10 +39,16 @@ deferred or removed capability requires the written reconsideration decision def
 the exclusion register and corresponding updates to both authoritative files before
 implementation begins. Do not infer approval from technical convenience.
 
-## Prompt 3 boundary
+## Prompt 4 boundary
 
-This phase adds only the immutable Today task/plan model and App-owned SQLite operations
-to create, edit, soft delete, reorder, and load the current local day's tasks. The
-packaged shell initializes storage but still has no task screen. It intentionally contains
-no navigation, timer behavior, breaks, schedule repair, session-history table, recurrence,
-categories, dependencies, rich notes, AI, calendar integration, or multi-day backlog.
+This phase adds the pure authoritative focus-session state machine, monotonic active-time
+accounting, durable recovery checkpoints, and the narrow App persistence/lifecycle bridge
+needed to commit them. It covers count-up, countdown, pause/resume, the planned limit,
+positive overtime, five-minute Landing, explicit extension, completion, parking, Break,
+recovery, and day closure as domain transitions rather than as screens.
+
+The packaged shell remains plain and has no task or timer UI. This phase does not add a
+background service, adaptive or additional focus modes, schedule repair, session-history
+table, Context Capsule note, recurrence, categories, dependencies, rich notes, AI,
+calendar integration, or multi-day backlog. Those capabilities remain governed by the
+authoritative feature registers and their later milestones.

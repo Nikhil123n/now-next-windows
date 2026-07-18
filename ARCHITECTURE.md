@@ -46,10 +46,13 @@ and is not referenced.
 
 ## Project boundaries
 
-- `NowNext.Core` contains the immutable Today task and ordering model. It owns current
-  domain validation and remains free of WinUI, Windows storage, and package dependencies.
-- `NowNext.App` contains the packaged shell, Windows lifecycle composition, and concrete
-  SQLite store. It initializes the per-user database before showing readiness.
+- `NowNext.Core` contains the immutable Today task and ordering model plus the pure,
+  authoritative focus-session state machine. It owns domain validation, transitions,
+  timer projections, and durable-checkpoint validation while remaining free of WinUI,
+  Windows storage, and package dependencies.
+- `NowNext.App` contains the packaged shell, the narrow Windows lifecycle/runtime bridge,
+  and the concrete SQLite store. It initializes the per-user database before showing
+  readiness and commits a transition before publishing it as successful.
 - `NowNext.Core.Tests` targets Windows and references both production projects. Domain
   and persistence tests remain separated by namespace and directory.
 
@@ -62,12 +65,24 @@ future-platform adapter.
 
 Core owns the authoritative session state machine. UI events request transitions; views
 do not calculate or persist authoritative elapsed time. Use `TimeProvider` so time can be
-controlled in tests. Persist committed active duration and recovery checkpoints rather
-than trusting a continuously running UI timer.
+controlled in tests. Running states use `TimeProvider.GetTimestamp()` and
+`GetElapsedTime()`; UTC wall time is only persistence and schedule metadata. A delayed UI
+refresh changes presentation latency, not elapsed time. Persist committed active duration
+and recovery checkpoints rather than trusting a continuously running UI timer.
+
+Session state is immutable and transitions are explicit across Ready, Focusing, Paused,
+LimitReached, Overtime, Landing, Break, Completed, Parked, RecoveryRequired, and
+DayClosed. State-specific values replace unrelated booleans. Count-up and countdown are
+projections over the same active elapsed value and approved limit; both use positive
+overtime after that limit. Landing is an explicit five-minute active phase. Break elapsed
+is separate from focus elapsed.
 
 On restart, crash, sleep, resume, or long absence, present an explicit recovery choice.
 Unobserved time is excluded unless the user deliberately includes it. Count-up and
 countdown share transition rules and both enter positive overtime after their limit.
+Persisted checkpoints never contain a reusable process-local monotonic timestamp. The App
+serializes overlapping UI and power events through one built-in asynchronous gate; it
+does not add a timer loop, actor, channel, hosted service, or background worker.
 
 Schedule repair is a pure, deterministic proposal before persistence: preserve Fixed
 items and shutdown, consume buffer, move Flexible work, then suggest a deferral if
@@ -79,10 +94,12 @@ Use a concrete SQLite store organized around product operations, not a generic s
 interface. Execute parameterized SQL inside explicit transactions. Commit recovery-
 critical data before reporting success to the UI.
 
-Prompt 3 stores `now-next.db` under the package user's LocalState directory and supports
-only create, edit, soft delete, reorder, and load for the injected clock's local day.
-See [the version 1 schema](docs/sqlite-schema.md). Task rows are retained after schedule
-deletion so future history can reference them, but no history table exists yet.
+The App stores `now-next.db` under the package user's LocalState directory. Schema version
+1 supports create, edit, soft delete, reorder, and load for the injected clock's local
+day. Prompt 4 adds schema version 2 for the single durable current-session checkpoint.
+See [the SQLite schema contract](docs/sqlite-schema.md). Task rows are retained after
+schedule deletion so current and future session records can keep stable references, but
+no session-history table exists yet.
 
 Maintain an ordered schema-migration table. Once a migration reaches `main`, never edit,
 renumber, or reuse it; add a forward migration. Migration application is transactional

@@ -24,7 +24,10 @@ Motion calls for a static colon.
 - Never silently count sleep, suspension, or an unobserved absence as focused time.
 - Schedule repairs are deterministic, explained, previewed, and approved before apply.
 - The focus view normally contains only the focus label and timer.
-- Prompt 3 permits only today's domain and persistence foundation; the shell has no task UI.
+- Prompt 4 permits the authoritative Core timer/session state machine, durable recovery
+  checkpoints, and narrow App lifecycle integration; the shell still has no task UI.
+- Do not infer permission for polished timer UI, background services, schedule repair,
+  session history, or another focus mode from the Prompt 4 timing foundation.
 
 ## Approved implementation shape
 
@@ -42,6 +45,8 @@ Motion calls for a static colon.
 - Keep changes surgical and tie every dependency to a current requirement.
 - Preserve committed migrations; add a new migration rather than rewriting history.
 - Use `TimeProvider` and persisted checkpoints for testable, recoverable timing.
+- Keep session transitions immutable and explicit; serialize App persistence operations
+  with the smallest built-in asynchronous primitive that meets the current requirement.
 - Follow [.editorconfig](.editorconfig); nullable warnings and analyzer warnings are errors.
 - Do not log task content unless the user explicitly exports it.
 

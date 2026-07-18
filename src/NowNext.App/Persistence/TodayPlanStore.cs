@@ -8,7 +8,7 @@ using DomainTask = NowNext.Core.Domain.Task;
 
 namespace NowNext.App.Persistence;
 
-public sealed class TodayPlanStore : IDisposable
+public sealed partial class TodayPlanStore : IDisposable
 {
     private const string DatabaseFileName = "now-next.db";
     private const string DateFormat = "yyyy-MM-dd";
@@ -21,6 +21,10 @@ public sealed class TodayPlanStore : IDisposable
             1,
             "initial_today_plan",
             "NowNext.App.Persistence.Migrations.0001_initial_today_plan.sql"),
+        new(
+            2,
+            "current_focus_session_checkpoint",
+            "NowNext.App.Persistence.Migrations.0002_current_focus_session_checkpoint.sql"),
     ];
 
     private readonly string _databasePath;
@@ -223,6 +227,12 @@ public sealed class TodayPlanStore : IDisposable
             await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
             await using SqliteTransaction transaction =
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            await EnsureNoUnresolvedSessionAsync(
+                connection,
+                transaction,
+                taskId,
+                cancellationToken);
 
             int deletedPosition = await GetScheduledPositionAsync(
                 connection,

@@ -53,6 +53,73 @@ internal sealed class FixedTimeProvider : TimeProvider
     }
 }
 
+internal sealed class ManualTimeProvider : TimeProvider
+{
+    private DateTimeOffset _utcNow;
+    private long _timestamp;
+
+    internal ManualTimeProvider(
+        DateTimeOffset utcNow,
+        long timestamp = 0,
+        long timestampFrequency = TimeSpan.TicksPerSecond)
+    {
+        if (timestampFrequency <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timestampFrequency),
+                "Timestamp frequency must be positive.");
+        }
+
+        _utcNow = utcNow.ToUniversalTime();
+        _timestamp = timestamp;
+        TimestampFrequency = timestampFrequency;
+    }
+
+    public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+    public override long TimestampFrequency { get; }
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        return _utcNow;
+    }
+
+    public override long GetTimestamp()
+    {
+        return _timestamp;
+    }
+
+    internal void Advance(TimeSpan duration)
+    {
+        AdvanceMonotonic(duration);
+        AdjustUtc(duration);
+    }
+
+    internal void AdvanceMonotonic(TimeSpan duration)
+    {
+        decimal timestampDelta =
+            duration.Ticks * (decimal)TimestampFrequency / TimeSpan.TicksPerSecond;
+        if (timestampDelta != decimal.Truncate(timestampDelta))
+        {
+            throw new ArgumentException(
+                "Duration must resolve to a whole timestamp unit.",
+                nameof(duration));
+        }
+
+        _timestamp = checked(_timestamp + decimal.ToInt64(timestampDelta));
+    }
+
+    internal void AdjustUtc(TimeSpan duration)
+    {
+        _utcNow = _utcNow.Add(duration);
+    }
+
+    internal void SetTimestamp(long timestamp)
+    {
+        _timestamp = timestamp;
+    }
+}
+
 internal sealed class TestDatabase : IDisposable
 {
     private readonly string _directoryPath;
