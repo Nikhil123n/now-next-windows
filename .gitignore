@@ -1,0 +1,50 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Visual Studio and user state
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+Generated Files/
+
+# JetBrains and VS Code
+.idea/
+.vscode/
+*.DotSettings.user
+
+# NuGet and MSIX
+packages/
+*.nupkg
+*.snupkg
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+_pkginfo.txt
+
+# Windows and temporary files
+Thumbs.db
+Desktop.ini
+*.tmp
+*.bak
+*.log
+
+# Local databases, exports, and secrets
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.pfx
+*.cer
+*.key
+.env
+.env.*
+!.env.example

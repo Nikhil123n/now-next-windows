@@ -1,0 +1,34 @@
+name: Feature proposal
+description: Propose the smallest change for an observed user problem.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Observed problem
+      description: Describe evidence from real use, not only a possible capability.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope-register status
+      description: Link the approval, or answer every reconsideration question for deferred/removed work.
+    validations:
+      required: true
+  - type: textarea
+    id: smallest-test
+    attributes:
+      label: Smallest useful change
+      description: What is the narrowest implementation that tests the hypothesis?
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Success and removal criteria
+      description: How will success be measured, and what can be removed if it does not help?
+    validations:
+      required: true
