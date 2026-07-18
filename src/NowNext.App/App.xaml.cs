@@ -18,9 +18,7 @@ public partial class App : Application, IDisposable
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
-        const string readyMessage = "NOW/NEXT prototype is ready.";
         const string storageFailureMessage = "NOW/NEXT could not initialize local storage.";
-        string statusMessage;
 
         try
         {
@@ -29,15 +27,14 @@ public partial class App : Application, IDisposable
             _sessionRuntime = new FocusSessionRuntime(_store);
             await _sessionRuntime.InitializeAsync();
             PowerManager.SystemSuspendStatusChanged += OnSystemSuspendStatusChanged;
-            statusMessage = readyMessage;
+            _window = new MainWindow(_store, _sessionRuntime);
         }
         catch (Exception exception) when (
             exception is TodayPlanStorageException or InvalidDataException)
         {
-            statusMessage = storageFailureMessage;
+            _window = new MainWindow(storageFailureMessage);
         }
 
-        _window = new MainWindow(statusMessage);
         _window.Closed += OnWindowClosed;
         _window.Activate();
     }

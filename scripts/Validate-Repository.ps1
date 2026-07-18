@@ -79,9 +79,11 @@ $requiredFiles = @(
     'docs\plans\prompt-2-application-scaffold.md',
     'docs\plans\prompt-3-today-domain-and-sqlite.md',
     'docs\plans\prompt-4-authoritative-timer-state-machine.md',
+    'docs\plans\prompt-5-today-focus-vertical-slice.md',
     'docs\sqlite-schema.md',
     'docs\timer-invariants.md',
     'docs\testing\README.md',
+    'docs\testing\prompt-5-manual-test-script.md',
     'scripts\Database-Dev.ps1',
     'scripts\Verify.ps1',
     'scripts\Validate-AgentSkills.ps1',
@@ -103,6 +105,10 @@ $requiredFiles = @(
     'src\NowNext.App\Persistence\TodayPlanStore.cs',
     'src\NowNext.App\app.manifest',
     'src\NowNext.App\packages.lock.json',
+    'src\NowNext.App\Presentation\FocusControlPolicy.cs',
+    'src\NowNext.App\Presentation\TaskEditorInput.cs',
+    'src\NowNext.App\Presentation\TimerDisplayFormatter.cs',
+    'src\NowNext.App\Presentation\TodayTaskItem.cs',
     'src\NowNext.Core\NowNext.Core.csproj',
     'src\NowNext.Core\Domain\ScheduleEntry.cs',
     'src\NowNext.Core\Domain\ScheduleType.cs',
@@ -126,6 +132,10 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\Persistence\MigrationTests.cs',
     'tests\NowNext.Core.Tests\Persistence\CurrentSessionStoreTests.cs',
     'tests\NowNext.Core.Tests\Persistence\TodayPlanStoreTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\FocusControlPolicyTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\FocusViewContractTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\TaskEditorInputTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\TimerDisplayFormatterTests.cs',
     'tests\NowNext.Core.Tests\Runtime\FocusSessionRuntimeTests.cs',
     'tests\NowNext.Core.Tests\Sessions\FocusSessionMachineTests.cs',
     'tests\NowNext.Core.Tests\Sessions\SessionRecoveryTests.cs',
@@ -149,10 +159,12 @@ $requiredDirectories = @(
     'docs\plans',
     'docs\testing',
     'src\NowNext.App\Persistence\Migrations',
+    'src\NowNext.App\Presentation',
     'src\NowNext.Core\Domain',
     'src\NowNext.Core\Sessions',
     'tests\NowNext.Core.Tests\Domain',
     'tests\NowNext.Core.Tests\Persistence',
+    'tests\NowNext.Core.Tests\Presentation',
     'tests\NowNext.Core.Tests\Runtime',
     'tests\NowNext.Core.Tests\Sessions',
     'src\NowNext.App',
@@ -415,9 +427,10 @@ foreach ($difference in @(Compare-Object $expectedMigrations $migrationFiles)) {
 }
 
 $documentationRequirements = @{
-    'AGENTS.md' = 'Prompt 4'
-    'ARCHITECTURE.md' = 'authoritative session state machine'
-    'SCOPE.md' = '## Prompt 4 boundary'
+    'AGENTS.md' = 'current vertical slice'
+    'ARCHITECTURE.md' = 'foreground `DispatcherQueueTimer`'
+    'SCOPE.md' = '## Current vertical-slice boundary'
+    'docs\testing\README.md' = 'Prompt 5 manual test script'
     'docs\sqlite-schema.md' = 'current_session_checkpoint'
     'docs\timer-invariants.md' = 'RecoveryRequired'
 }
@@ -425,7 +438,7 @@ foreach ($requirement in $documentationRequirements.GetEnumerator()) {
     $path = Join-Path $repositoryRoot $requirement.Key
     if ((Test-Path -LiteralPath $path -PathType Leaf) -and
         -not (Get-Content -LiteralPath $path -Encoding UTF8 -Raw).Contains($requirement.Value)) {
-        Add-ValidationError "$($requirement.Key) is missing Prompt 4 documentation: $($requirement.Value)"
+        Add-ValidationError "$($requirement.Key) is missing current-phase documentation: $($requirement.Value)"
     }
 }
 
@@ -453,5 +466,5 @@ if ($errors.Count -gt 0) {
 }
 
 Write-Host "PASS: repository specification validated at $repositoryRoot" -ForegroundColor Green
-Write-Host '      Required files, authoritative hashes/references, links, policies, and Prompt 4 project boundaries are valid.'
+Write-Host '      Required files, authoritative hashes/references, links, policies, and current project boundaries are valid.'
 Write-Host '      The solution contains exactly two production projects and one test project.'

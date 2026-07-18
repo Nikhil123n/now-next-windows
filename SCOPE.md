@@ -39,16 +39,16 @@ deferred or removed capability requires the written reconsideration decision def
 the exclusion register and corresponding updates to both authoritative files before
 implementation begins. Do not infer approval from technical convenience.
 
-## Prompt 4 boundary
+## Current vertical-slice boundary
 
-This phase adds the pure authoritative focus-session state machine, monotonic active-time
-accounting, durable recovery checkpoints, and the narrow App persistence/lifecycle bridge
-needed to commit them. It covers count-up, countdown, pause/resume, the planned limit,
-positive overtime, five-minute Landing, explicit extension, completion, parking, Break,
-recovery, and day closure as domain transitions rather than as screens.
+This phase connects the existing Today model, App-owned SQLite store, and authoritative
+focus-session engine to a visually plain WinUI flow. It includes today's ordered task
+list and approved editor fields, explicit Fixed/Flexible status, Start, both timer modes,
+transient focus controls, five-minute Landing, extension, completion, parking, and
+explicit restart/suspension recovery.
 
-The packaged shell remains plain and has no task or timer UI. This phase does not add a
-background service, adaptive or additional focus modes, schedule repair, session-history
-table, Context Capsule note, recurrence, categories, dependencies, rich notes, AI,
-calendar integration, or multi-day backlog. Those capabilities remain governed by the
-authoritative feature registers and their later milestones.
+The UI is not a general task manager and the DispatcherQueue refresh only requests Core
+projections and durability checkpoints; it never owns elapsed time. This phase does not
+add Break UI, a background service, adaptive or additional focus modes, schedule repair,
+session history, Context Capsule notes, recurrence, categories, dependencies, rich notes,
+AI, calendar integration, multi-day backlog, themes, custom icons, or visual polish.
