@@ -1,0 +1,32 @@
+name: Bug report
+description: Report reproducible incorrect NOW/NEXT behavior.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Include the state, timing mode, steps, and relevant restart or sleep events.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Product invariant at risk
+      description: Note any invented time, lost state, silent schedule change, or accessibility impact.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Windows environment
+      description: Windows version, device, app build, and motion/accessibility settings.
+    validations:
+      required: true
