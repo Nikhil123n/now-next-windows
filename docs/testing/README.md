@@ -3,31 +3,23 @@
 Testing protects honest timekeeping, deliberate transitions, and local recovery. Prefer
 deterministic Core tests over timing sleeps or UI-driven business logic.
 
-## Prompt 1
+## Prompt 3 and later
 
-Run:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Validate-Repository.ps1
-```
-
-The repository validator invokes the audited-skill validator, checks required knowledge
-and policy files, feature-register hashes and references, internal Markdown links, CI
-policy, and the absence of product implementation.
-
-## Prompt 2 and later
-
-CI and local verification must run:
+CI and local verification use the same canonical command:
 
 ```powershell
-dotnet restore .\NowNext.slnx --locked-mode
-dotnet format .\NowNext.slnx --verify-no-changes --no-restore
-dotnet build .\NowNext.slnx --configuration Release --no-restore -warnaserror
-dotnet test --solution .\NowNext.slnx --configuration Release --no-build --results-directory .\TestResults --report-trx
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1
 ```
 
-The .NET 10 test command uses Microsoft.Testing.Platform syntax. Prompt 2 must make all
-four commands mandatory in CI and retire the Prompt 1 implementation-absence check.
+The script validates repository policy, performs the locked restore, verifies formatting,
+builds Release, and runs tests. The .NET 10 test command uses
+Microsoft.Testing.Platform syntax.
+
+The suite retains the Core assembly smoke test and adds deterministic domain and SQLite
+coverage. Persistence tests use a fixed `TimeProvider`, unique temporary database paths,
+and never access the packaged user's LocalState. They verify exact round trips, ordering,
+mutation rollback, soft deletion, cancellation, corrupt data, migration versioning and
+rollback, and foreign-key integrity.
 
 ## Required automated coverage
 

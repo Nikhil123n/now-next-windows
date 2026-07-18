@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NowNext.App/NowNext.App.csproj" />
+    <Project Path="src/NowNext.Core/NowNext.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NowNext.Core.Tests/NowNext.Core.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,16 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+    <MSTestAnalysisMode>Recommended</MSTestAnalysisMode>
+    <WindowsAppSdkAutoInitialize>false</WindowsAppSdkAutoInitialize>
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NowNext.Core\NowNext.Core.csproj" />
+    <ProjectReference Include="..\..\src\NowNext.App\NowNext.App.csproj" />
+  </ItemGroup>
+</Project>
