@@ -241,7 +241,7 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
         'validation:',
         'runs-on: windows-latest',
         'actions/checkout@v7',
-        'actions/setup-dotnet@v5',
+        'actions/setup-dotnet@v6',
         'global-json-file: global.json',
         'cache-dependency-path: ''**/packages.lock.json''',
         'powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1'
