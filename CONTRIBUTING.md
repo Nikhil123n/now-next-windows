@@ -34,10 +34,10 @@ same review as manual upgrades.
 
 ## Verification
 
-Run the repository validator for every change. After Prompt 2, run the locked restore,
-format, Release build, and test commands documented in [AGENTS.md](AGENTS.md). Add tests
-for state transitions, both timer modes, boundary behavior, recovery, schedule repair,
-persistence, and migrations as applicable.
+Run the canonical command documented in [AGENTS.md](AGENTS.md) for every change. It
+validates repository policy, performs a locked restore, verifies formatting, builds
+Release, and runs tests. Add tests for state transitions, both timer modes, boundary
+behavior, recovery, schedule repair, persistence, and migrations as applicable.
 
 ## Definition of done
 

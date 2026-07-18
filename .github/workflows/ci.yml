@@ -10,60 +10,21 @@ permissions:
   contents: read
 
 jobs:
-  repository-validation:
-    name: Repository validation
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Validate specification and repository policy
-        shell: powershell
-        run: .\scripts\Validate-Repository.ps1
-
-  application-validation:
-    name: Application validation
-    needs: repository-validation
+  validation:
+    name: Validation
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Detect application files
-        id: application
-        shell: powershell
-        run: |
-          $hasSolution = Test-Path -LiteralPath '.\NowNext.slnx' -PathType Leaf
-          $hasProject = @(Get-ChildItem -Path . -Recurse -File -Filter '*.csproj').Count -gt 0
-          "exists=$($hasSolution -or $hasProject)".ToLowerInvariant() | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Application validation not yet applicable
-        if: steps.application.outputs.exists != 'true'
-        shell: powershell
-        run: Write-Host 'Application validation is not yet applicable; Prompt 2 will scaffold the real solution.'
-
-      - name: Set up .NET 10
-        if: steps.application.outputs.exists == 'true'
+      - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.302
+          global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
 
-      - name: Restore locked dependencies
-        if: steps.application.outputs.exists == 'true'
-        run: dotnet restore .\NowNext.slnx --locked-mode
-
-      - name: Verify formatting
-        if: steps.application.outputs.exists == 'true'
-        run: dotnet format .\NowNext.slnx --verify-no-changes --no-restore
-
-      - name: Build Release
-        if: steps.application.outputs.exists == 'true'
-        run: dotnet build .\NowNext.slnx --configuration Release --no-restore -warnaserror
-
-      - name: Test
-        if: steps.application.outputs.exists == 'true'
-        run: dotnet test --solution .\NowNext.slnx --configuration Release --no-build --results-directory .\TestResults --report-trx
+      - name: Verify repository and application
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1

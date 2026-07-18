@@ -39,8 +39,10 @@ deferred or removed capability requires the written reconsideration decision def
 the exclusion register and corresponding updates to both authoritative files before
 implementation begins. Do not infer approval from technical convenience.
 
-## Prompt 1 boundary
+## Prompt 3 boundary
 
-This phase contains repository knowledge and verification only. It intentionally has no
-solution, project, source, XAML, package manifest, or database. Prompt 2 will scaffold
-the approved three-project solution and will make .NET CI validation mandatory.
+This phase adds only the immutable Today task/plan model and App-owned SQLite operations
+to create, edit, soft delete, reorder, and load the current local day's tasks. The
+packaged shell initializes storage but still has no task screen. It intentionally contains
+no navigation, timer behavior, breaks, schedule repair, session-history table, recurrence,
+categories, dependencies, rich notes, AI, calendar integration, or multi-day backlog.

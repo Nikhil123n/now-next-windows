@@ -22,10 +22,15 @@ approved subject to Windows Reduced Motion accessibility behavior.
 
 - [Decision records](decisions/README.md) — durable architectural choices.
 - [Plan template](plans/PLAN_TEMPLATE.md) — required shape for multi-step work.
+- [Prompt 2 scaffold plan](plans/prompt-2-application-scaffold.md) — packaged shell and
+  shared verification implementation.
+- [Prompt 3 domain and SQLite plan](plans/prompt-3-today-domain-and-sqlite.md) — Today
+  model, local persistence, and verification record.
+- [SQLite schema](sqlite-schema.md) — current migration and retention contract.
 - [Testing strategy](testing/README.md) — verification layers and required scenarios.
 
 ## Current phase
 
-Prompt 1 is a specification-and-harness phase. No application solution or implementation
-exists. Prompt 2 will create the approved three-project solution and make all .NET CI
-steps mandatory.
+Prompt 3 contains the immutable Today planning model and App-owned, versioned SQLite
+storage for the current local day. The packaged app still shows only its readiness shell;
+task UI, focus timing, repair, history, and deferred features remain unimplemented.

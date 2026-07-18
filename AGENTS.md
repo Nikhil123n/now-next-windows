@@ -24,7 +24,7 @@ Motion calls for a static colon.
 - Never silently count sleep, suspension, or an unobserved absence as focused time.
 - Schedule repairs are deterministic, explained, previewed, and approved before apply.
 - The focus view normally contains only the focus label and timer.
-- Do not scaffold application projects until Prompt 2.
+- Prompt 3 permits only today's domain and persistence foundation; the shell has no task UI.
 
 ## Approved implementation shape
 
@@ -47,20 +47,14 @@ Motion calls for a static colon.
 
 ## Verification
 
-Prompt 1 repository checks:
+Run the canonical local and CI verification command:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Validate-Repository.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1
 ```
 
-After Prompt 2 creates `NowNext.slnx`:
-
-```powershell
-dotnet restore .\NowNext.slnx --locked-mode
-dotnet format .\NowNext.slnx --verify-no-changes --no-restore
-dotnet build .\NowNext.slnx --configuration Release --no-restore -warnaserror
-dotnet test --solution .\NowNext.slnx --configuration Release --no-build --results-directory .\TestResults --report-trx
-```
+The script validates repository policy, performs a locked restore, verifies formatting,
+builds Release with warnings as errors, and runs tests through Microsoft.Testing.Platform.
 
 The definition of done is in [CONTRIBUTING.md](CONTRIBUTING.md). Report checks actually
 run, any skipped checks, and remaining risk.

@@ -64,6 +64,7 @@ $requiredFiles = @(
     'FEATURES_FORWARD.md',
     'global.json',
     'LICENSE',
+    'NowNext.slnx',
     'PRODUCT.md',
     'README.md',
     'SCOPE.md',
@@ -73,10 +74,48 @@ $requiredFiles = @(
     'docs\decisions\0001-windows-native-project-shape.md',
     'docs\decisions\0002-authoritative-time-and-recovery.md',
     'docs\decisions\0003-sqlite-persistence-and-migrations.md',
+    'docs\decisions\0004-app-owned-sqlite-persistence.md',
     'docs\plans\PLAN_TEMPLATE.md',
+    'docs\plans\prompt-2-application-scaffold.md',
+    'docs\plans\prompt-3-today-domain-and-sqlite.md',
+    'docs\sqlite-schema.md',
     'docs\testing\README.md',
+    'scripts\Database-Dev.ps1',
+    'scripts\Verify.ps1',
     'scripts\Validate-AgentSkills.ps1',
-    'scripts\Validate-Repository.ps1'
+    'scripts\Validate-Repository.ps1',
+    'src\NowNext.App\App.xaml',
+    'src\NowNext.App\App.xaml.cs',
+    'src\NowNext.App\Assets\Square150x150Logo.scale-200.png',
+    'src\NowNext.App\Assets\Square44x44Logo.scale-200.png',
+    'src\NowNext.App\Assets\StoreLogo.png',
+    'src\NowNext.App\MainWindow.xaml',
+    'src\NowNext.App\MainWindow.xaml.cs',
+    'src\NowNext.App\NowNext.App.csproj',
+    'src\NowNext.App\Package.appxmanifest',
+    'src\NowNext.App\Persistence\Migrations\0001_initial_today_plan.sql',
+    'src\NowNext.App\Persistence\TodayPlanStorageException.cs',
+    'src\NowNext.App\Persistence\TodayPlanStore.cs',
+    'src\NowNext.App\app.manifest',
+    'src\NowNext.App\packages.lock.json',
+    'src\NowNext.Core\NowNext.Core.csproj',
+    'src\NowNext.Core\Domain\ScheduleEntry.cs',
+    'src\NowNext.Core\Domain\ScheduleType.cs',
+    'src\NowNext.Core\Domain\Task.cs',
+    'src\NowNext.Core\Domain\TaskId.cs',
+    'src\NowNext.Core\Domain\TaskImportance.cs',
+    'src\NowNext.Core\Domain\TaskState.cs',
+    'src\NowNext.Core\Domain\TimingMode.cs',
+    'src\NowNext.Core\Domain\TodayPlan.cs',
+    'src\NowNext.Core\packages.lock.json',
+    'tests\NowNext.Core.Tests\CoreAssemblySmokeTests.cs',
+    'tests\NowNext.Core.Tests\Domain\TaskTests.cs',
+    'tests\NowNext.Core.Tests\Domain\TodayPlanTests.cs',
+    'tests\NowNext.Core.Tests\NowNext.Core.Tests.csproj',
+    'tests\NowNext.Core.Tests\Persistence\MigrationTests.cs',
+    'tests\NowNext.Core.Tests\Persistence\TodayPlanStoreTests.cs',
+    'tests\NowNext.Core.Tests\TestSupport.cs',
+    'tests\NowNext.Core.Tests\packages.lock.json'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -91,7 +130,14 @@ $requiredDirectories = @(
     '.github\workflows',
     'docs\decisions',
     'docs\plans',
-    'docs\testing'
+    'docs\testing',
+    'src\NowNext.App\Persistence\Migrations',
+    'src\NowNext.Core\Domain',
+    'tests\NowNext.Core.Tests\Domain',
+    'tests\NowNext.Core.Tests\Persistence',
+    'src\NowNext.App',
+    'src\NowNext.Core',
+    'tests\NowNext.Core.Tests'
 )
 foreach ($relativePath in $requiredDirectories) {
     if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $relativePath) -PathType Container)) {
@@ -192,26 +238,21 @@ if (Test-Path -LiteralPath $workflowPath -PathType Leaf) {
     $workflowRequirements = @(
         'push:',
         'pull_request:',
-        'repository-validation:',
-        'application-validation:',
+        'validation:',
         'runs-on: windows-latest',
-        'actions/checkout@v6',
-        '.\scripts\Validate-Repository.ps1',
-        "if: steps.application.outputs.exists != 'true'",
-        "if: steps.application.outputs.exists == 'true'",
+        'actions/checkout@v7',
         'actions/setup-dotnet@v5',
-        'dotnet restore .\NowNext.slnx --locked-mode',
-        'dotnet format .\NowNext.slnx --verify-no-changes --no-restore',
-        'dotnet build .\NowNext.slnx --configuration Release --no-restore -warnaserror',
-        'dotnet test --solution .\NowNext.slnx --configuration Release --no-build --results-directory .\TestResults --report-trx'
+        'global-json-file: global.json',
+        'cache-dependency-path: ''**/packages.lock.json''',
+        'powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1'
     )
     foreach ($requirement in $workflowRequirements) {
         if (-not $workflow.Contains($requirement)) {
             Add-ValidationError "CI workflow is missing required content: $requirement"
         }
     }
-    if ([regex]::Matches($workflow, 'runs-on: windows-latest').Count -ne 2) {
-        Add-ValidationError 'CI workflow must contain exactly two Windows jobs.'
+    if ([regex]::Matches($workflow, 'runs-on: windows-latest').Count -ne 1) {
+        Add-ValidationError 'CI workflow must contain exactly one Windows job.'
     }
 }
 
@@ -225,24 +266,146 @@ if (Test-Path -LiteralPath $dependabotPath -PathType Leaf) {
     }
 }
 
-$implementationExtensions = @(
-    '.appxmanifest', '.cs', '.csproj', '.db', '.msixmanifest', '.sln', '.slnx',
-    '.sqlite', '.sqlite3', '.xaml'
+$expectedProjectPaths = @(
+    'src\NowNext.App\NowNext.App.csproj',
+    'src\NowNext.Core\NowNext.Core.csproj',
+    'tests\NowNext.Core.Tests\NowNext.Core.Tests.csproj'
 )
+$actualProjectPaths = @(Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.csproj' |
+    ForEach-Object { Get-RelativePathText $_.FullName } |
+    Sort-Object)
+$projectDifferences = @(Compare-Object -ReferenceObject $expectedProjectPaths -DifferenceObject $actualProjectPaths)
+foreach ($difference in $projectDifferences) {
+    $kind = if ($difference.SideIndicator -eq '<=') { 'Missing' } else { 'Unexpected' }
+    Add-ValidationError "$kind project: $($difference.InputObject)"
+}
+
+$solutionFiles = @(Get-ChildItem -LiteralPath $repositoryRoot -File |
+    Where-Object { $_.Extension -in @('.sln', '.slnx') })
+if ($solutionFiles.Count -ne 1 -or $solutionFiles[0].Name -ne 'NowNext.slnx') {
+    Add-ValidationError 'The repository must contain only the NowNext.slnx solution.'
+}
+else {
+    try {
+        [xml] $solution = Get-Content -LiteralPath $solutionFiles[0].FullName -Encoding UTF8 -Raw
+        $solutionProjectPaths = @($solution.SelectNodes('//Project') |
+            ForEach-Object { $_.Path.Replace('/', '\') } |
+            Sort-Object)
+        $solutionDifferences = @(Compare-Object -ReferenceObject $expectedProjectPaths -DifferenceObject $solutionProjectPaths)
+        foreach ($difference in $solutionDifferences) {
+            Add-ValidationError "NowNext.slnx project mismatch: $($difference.InputObject)"
+        }
+    }
+    catch {
+        Add-ValidationError "NowNext.slnx is invalid XML: $($_.Exception.Message)"
+    }
+}
+
 $repositoryFiles = @(Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File |
     Where-Object { $_.FullName -notlike "$repositoryRoot\.git\*" })
 foreach ($file in $repositoryFiles) {
-    if ($implementationExtensions -contains $file.Extension.ToLowerInvariant()) {
-        Add-ValidationError "Prompt 1 must not contain product implementation: $(Get-RelativePathText $file.FullName)"
-    }
     if ($file.Name -match '^(?i:Dockerfile|docker-compose(?:\..+)?\.ya?ml|openapi\.ya?ml|azure-pipelines\.ya?ml|render\.ya?ml|vercel\.json)$') {
         Add-ValidationError "Prohibited cloud/server artifact: $(Get-RelativePathText $file.FullName)"
     }
 }
 
+$coreProjectPath = Join-Path $repositoryRoot 'src\NowNext.Core\NowNext.Core.csproj'
+$appProjectPath = Join-Path $repositoryRoot 'src\NowNext.App\NowNext.App.csproj'
+$testProjectPath = Join-Path $repositoryRoot 'tests\NowNext.Core.Tests\NowNext.Core.Tests.csproj'
+if ((Test-Path -LiteralPath $coreProjectPath) -and
+    (Test-Path -LiteralPath $appProjectPath) -and
+    (Test-Path -LiteralPath $testProjectPath)) {
+    [xml] $coreProject = Get-Content -LiteralPath $coreProjectPath -Encoding UTF8 -Raw
+    [xml] $appProject = Get-Content -LiteralPath $appProjectPath -Encoding UTF8 -Raw
+    [xml] $testProject = Get-Content -LiteralPath $testProjectPath -Encoding UTF8 -Raw
+
+    if (@($coreProject.SelectNodes('//PackageReference')).Count -ne 0 -or
+        @($coreProject.SelectNodes('//ProjectReference')).Count -ne 0) {
+        Add-ValidationError 'NowNext.Core must remain dependency-free.'
+    }
+
+    $expectedAppPackages = @(
+        'Microsoft.Data.Sqlite',
+        'Microsoft.Windows.SDK.BuildTools',
+        'Microsoft.Windows.SDK.BuildTools.WinApp',
+        'Microsoft.WindowsAppSDK',
+        'SQLitePCLRaw.bundle_e_sqlite3'
+    )
+    $actualAppPackages = @($appProject.SelectNodes('//PackageReference') |
+        ForEach-Object { $_.GetAttribute('Include') } | Sort-Object)
+    foreach ($difference in @(Compare-Object $expectedAppPackages $actualAppPackages)) {
+        Add-ValidationError "NowNext.App package mismatch: $($difference.InputObject)"
+    }
+
+    $appReferences = @($appProject.SelectNodes('//ProjectReference') |
+        ForEach-Object { $_.GetAttribute('Include') })
+    if ($appReferences.Count -ne 1 -or
+        $appReferences[0] -ne '..\NowNext.Core\NowNext.Core.csproj') {
+        Add-ValidationError 'NowNext.App must reference only NowNext.Core.'
+    }
+
+    $embeddedMigrations = @($appProject.SelectNodes('//EmbeddedResource') |
+        ForEach-Object { $_.GetAttribute('Include') })
+    if ($embeddedMigrations.Count -ne 1 -or
+        $embeddedMigrations[0] -ne 'Persistence\Migrations\*.sql') {
+        Add-ValidationError 'NowNext.App must embed only its explicit SQL migration set.'
+    }
+
+    $testTargetFramework = [string] $testProject.Project.PropertyGroup.TargetFramework
+    if ($testTargetFramework -ne 'net10.0-windows10.0.26100.0') {
+        Add-ValidationError "NowNext.Core.Tests has unexpected TFM: $testTargetFramework"
+    }
+
+    $expectedTestReferences = @(
+        '..\..\src\NowNext.App\NowNext.App.csproj',
+        '..\..\src\NowNext.Core\NowNext.Core.csproj'
+    )
+    $actualTestReferences = @($testProject.SelectNodes('//ProjectReference') |
+        ForEach-Object { $_.GetAttribute('Include') } | Sort-Object)
+    foreach ($difference in @(Compare-Object $expectedTestReferences $actualTestReferences)) {
+        Add-ValidationError "NowNext.Core.Tests project-reference mismatch: $($difference.InputObject)"
+    }
+
+    if (@($testProject.SelectNodes('//PackageReference')).Count -ne 0) {
+        Add-ValidationError 'NowNext.Core.Tests must use the pinned MSTest SDK without direct packages.'
+    }
+}
+
+$sqlitePackageOwners = @(Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.csproj' |
+    Where-Object {
+        (Get-Content -LiteralPath $_.FullName -Encoding UTF8 -Raw).Contains(
+            '<PackageReference Include="Microsoft.Data.Sqlite"')
+    } |
+    ForEach-Object { Get-RelativePathText $_.FullName })
+if ($sqlitePackageOwners.Count -ne 1 -or
+    $sqlitePackageOwners[0] -ne 'src\NowNext.App\NowNext.App.csproj') {
+    Add-ValidationError 'Microsoft.Data.Sqlite must be referenced only by NowNext.App.'
+}
+
+$migrationFiles = @(Get-ChildItem -LiteralPath (
+        Join-Path $repositoryRoot 'src\NowNext.App\Persistence\Migrations') -File -Filter '*.sql')
+if ($migrationFiles.Count -ne 1 -or $migrationFiles[0].Name -ne '0001_initial_today_plan.sql') {
+    Add-ValidationError 'Prompt 3 must contain exactly the version 1 Today-plan migration.'
+}
+
+$documentationRequirements = @{
+    'AGENTS.md' = 'Prompt 3 permits only today''s domain and persistence foundation'
+    'ARCHITECTURE.md' = 'SQLitePCLRaw.bundle_e_sqlite3'
+    'SCOPE.md' = '## Prompt 3 boundary'
+    'docs\sqlite-schema.md' = 'ON DELETE RESTRICT'
+    'docs\decisions\0004-app-owned-sqlite-persistence.md' = 'App-owned SQLite persistence'
+}
+foreach ($requirement in $documentationRequirements.GetEnumerator()) {
+    $path = Join-Path $repositoryRoot $requirement.Key
+    if ((Test-Path -LiteralPath $path -PathType Leaf) -and
+        -not (Get-Content -LiteralPath $path -Encoding UTF8 -Raw).Contains($requirement.Value)) {
+        Add-ValidationError "$($requirement.Key) is missing Prompt 3 documentation: $($requirement.Value)"
+    }
+}
+
 $prohibitedDirectoryNames = @(
     'android', 'backend', 'cloud', 'ios', 'legacy', 'linux', 'macos', 'mobile',
-    'old', 'server', 'services', 'src', 'test', 'tests', 'web', 'website'
+    'old', 'server', 'services', 'web', 'website'
 )
 $repositoryDirectories = @(Get-ChildItem -LiteralPath $repositoryRoot -Recurse -Directory |
     Where-Object {
@@ -251,7 +414,7 @@ $repositoryDirectories = @(Get-ChildItem -LiteralPath $repositoryRoot -Recurse -
     })
 foreach ($directory in $repositoryDirectories) {
     if ($prohibitedDirectoryNames -contains $directory.Name.ToLowerInvariant()) {
-        Add-ValidationError "Prompt 1 contains a prohibited implementation/legacy directory: $(Get-RelativePathText $directory.FullName)"
+        Add-ValidationError "The repository contains a prohibited implementation/legacy directory: $(Get-RelativePathText $directory.FullName)"
     }
 }
 
@@ -264,5 +427,5 @@ if ($errors.Count -gt 0) {
 }
 
 Write-Host "PASS: repository specification validated at $repositoryRoot" -ForegroundColor Green
-Write-Host '      Required files, authoritative hashes/references, links, policies, and Prompt 1 boundaries are valid.'
-Write-Host '      Application validation is not yet applicable; Prompt 2 will scaffold the real solution.'
+Write-Host '      Required files, authoritative hashes/references, links, policies, and Prompt 3 project boundaries are valid.'
+Write-Host '      The solution contains exactly two production projects and one test project.'
