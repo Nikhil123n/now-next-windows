@@ -50,9 +50,10 @@ and is not referenced.
   authoritative focus-session state machine. It owns domain validation, transitions,
   timer projections, and durable-checkpoint validation while remaining free of WinUI,
   Windows storage, and package dependencies.
-- `NowNext.App` contains the packaged shell, the narrow Windows lifecycle/runtime bridge,
-  and the concrete SQLite store. It initializes the per-user database before showing
-  readiness and commits a transition before publishing it as successful.
+- `NowNext.App` contains the plain Today and Focus WinUI surfaces, small stateless
+  presentation formatters/policies, the narrow Windows lifecycle/runtime bridge, and the
+  concrete SQLite store. It initializes the per-user database before loading Today and
+  commits a transition before publishing it as successful.
 - `NowNext.Core.Tests` targets Windows and references both production projects. Domain
   and persistence tests remain separated by namespace and directory.
 
@@ -81,8 +82,16 @@ On restart, crash, sleep, resume, or long absence, present an explicit recovery 
 Unobserved time is excluded unless the user deliberately includes it. Count-up and
 countdown share transition rules and both enter positive overtime after their limit.
 Persisted checkpoints never contain a reusable process-local monotonic timestamp. The App
-serializes overlapping UI and power events through one built-in asynchronous gate; it
-does not add a timer loop, actor, channel, hosted service, or background worker.
+serializes overlapping UI and power events through one built-in asynchronous gate. A
+foreground `DispatcherQueueTimer` requests read-only Core projections for rendering and
+periodic persisted checkpoints; it never increments elapsed time and stops outside the
+Focus surface. There is no actor, channel, hosted service, or background worker.
+
+The WinUI layer uses direct code-behind composition because there are only two screens
+and no reusable application-service graph. Today mutations call the concrete store and
+reload the immutable plan. Focus commands call `FocusSessionRuntime`; the view formats
+only its `SessionView`. Introducing MVVM infrastructure or another layer requires a
+demonstrated coordination or reuse need.
 
 Schedule repair is a pure, deterministic proposal before persistence: preserve Fixed
 items and shutdown, consume buffer, move Flexible work, then suggest a deferral if
@@ -113,3 +122,8 @@ Support keyboard and touch, semantic labels, focus order, high contrast, text sc
 and Windows Reduced Motion. The blinking colon must not shift layout and becomes static
 when reduced motion applies. Diagnostic logs are local and exclude task content unless
 the user knowingly exports it.
+
+The normal Focus visual state renders only the short focus label and segmented monospace
+timer. Controls are a collapsed overlay revealed by intentional pointer, tap, or keyboard
+input and hidden after inactivity. Recovery is intentionally not a normal focus state and
+may keep its required decision controls visible.

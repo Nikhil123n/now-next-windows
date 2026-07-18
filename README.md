@@ -2,8 +2,8 @@
 
 NOW/NEXT is a private, local-only Windows 11 day-planning and focus application for one
 user on one Surface. This repository is the new source of truth and currently contains
-the Today domain and local SQLite foundation plus the Prompt 4 authoritative focus-session
-and recovery foundation behind a plain packaged shell.
+the Today domain and local SQLite foundation, the authoritative focus-session and
+recovery engine, and a plain runnable Today-to-Focus vertical slice.
 
 Start with [AGENTS.md](AGENTS.md), then read [PRODUCT.md](PRODUCT.md),
 [SCOPE.md](SCOPE.md), [ARCHITECTURE.md](ARCHITECTURE.md), the authoritative
@@ -21,6 +21,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1
 This validates repository policy, restores locked packages, verifies formatting, builds
 Release with warnings as errors, and runs the MSTest suite.
 
+Launch the packaged application after a Release build with:
+
+```powershell
+dotnet run --project .\src\NowNext.App\NowNext.App.csproj --configuration Release --no-build
+```
+
 ## Current status
 
 - Product and engineering decisions: specified.
@@ -31,8 +37,13 @@ Release with warnings as errors, and runs the MSTest suite.
 - Focus sessions: pure Core transitions for both timer modes, limits, overtime, Landing,
   extension, completion, parking, Break, recovery, and day closure. Elapsed work comes
   from monotonic time rather than UI refreshes.
-- Packaged application shell: initializes local storage, then displays
-  `NOW/NEXT prototype is ready.` It does not yet contain task or timer UI.
+- Packaged application: a plain Today screen supports approved-field editing, deletion,
+  ordering, and Start. The full-screen Focus view uses the authoritative engine for both
+  timer modes, transient controls, overtime, Landing, extension, parking, completion,
+  and explicit restart/suspension recovery.
+- UI automation: deterministic presentation contracts are tested in MSTest; the
+  interaction and Windows accessibility cases are recorded in the
+  [Prompt 5 manual test script](docs/testing/prompt-5-manual-test-script.md).
 - License: proprietary; see [LICENSE](LICENSE).
 
 See [the documentation index](docs/README.md) and [contribution guide](CONTRIBUTING.md)

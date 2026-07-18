@@ -24,10 +24,10 @@ Motion calls for a static colon.
 - Never silently count sleep, suspension, or an unobserved absence as focused time.
 - Schedule repairs are deterministic, explained, previewed, and approved before apply.
 - The focus view normally contains only the focus label and timer.
-- Prompt 4 permits the authoritative Core timer/session state machine, durable recovery
-  checkpoints, and narrow App lifecycle integration; the shell still has no task UI.
-- Do not infer permission for polished timer UI, background services, schedule repair,
-  session history, or another focus mode from the Prompt 4 timing foundation.
+- The current vertical slice includes plain Today planning and the minimal Focus view on
+  top of the authoritative Core session engine and durable recovery checkpoints.
+- Do not infer permission for visual polish, background services, Break UI, schedule
+  repair, session history, Context Capsules, or another focus mode from this slice.
 
 ## Approved implementation shape
 

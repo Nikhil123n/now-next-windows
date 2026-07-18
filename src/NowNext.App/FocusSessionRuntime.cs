@@ -20,6 +20,14 @@ public sealed class FocusSessionRuntime : IDisposable
 
     public FocusSession? Current => Volatile.Read(ref _current);
 
+    public SessionView GetCurrentView()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        FocusSession current = Volatile.Read(ref _current)
+            ?? throw new InvalidOperationException("There is no current focus session.");
+        return FocusSessionMachine.CreateView(current, _timeProvider);
+    }
+
     public async System.Threading.Tasks.Task InitializeAsync(
         CancellationToken cancellationToken = default)
     {
