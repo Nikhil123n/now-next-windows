@@ -3,6 +3,8 @@
 *.cs text eol=crlf
 *.xaml text eol=crlf
 *.ps1 text eol=crlf
+# Prompt 0 normalized the audited third-party validator to LF; preserve its fingerprint.
+scripts/Validate-AgentSkills.ps1 text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf

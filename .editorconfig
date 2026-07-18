@@ -9,6 +9,9 @@ trim_trailing_whitespace = true
 [*.{cs,xaml,ps1}]
 end_of_line = crlf
 
+[scripts/Validate-AgentSkills.ps1]
+end_of_line = lf
+
 [*.{cs,csx,vb,vbx}]
 indent_style = space
 indent_size = 4
