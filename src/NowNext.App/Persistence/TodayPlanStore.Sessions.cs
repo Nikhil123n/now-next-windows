@@ -7,9 +7,37 @@ namespace NowNext.App.Persistence;
 
 public sealed partial class TodayPlanStore
 {
-    public async System.Threading.Tasks.Task SaveCurrentSessionAsync(
+    public System.Threading.Tasks.Task SaveCurrentSessionAsync(
         SessionCheckpoint checkpoint,
         CancellationToken cancellationToken = default)
+    {
+        return SaveCurrentSessionCoreAsync(checkpoint, null, cancellationToken);
+    }
+
+    public System.Threading.Tasks.Task SaveCurrentSessionAndContextAsync(
+        SessionCheckpoint checkpoint,
+        ContextCapsule contextCapsule,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        ArgumentNullException.ThrowIfNull(contextCapsule);
+        if (checkpoint.State != SessionCheckpointState.Parked
+            || checkpoint.Id != contextCapsule.SessionId
+            || checkpoint.TaskId != contextCapsule.TaskId
+            || checkpoint.ParkedNextPhysicalAction != contextCapsule.NextPhysicalAction)
+        {
+            throw new ArgumentException(
+                "The Context Capsule must match the parked session checkpoint.",
+                nameof(contextCapsule));
+        }
+
+        return SaveCurrentSessionCoreAsync(checkpoint, contextCapsule, cancellationToken);
+    }
+
+    private async System.Threading.Tasks.Task SaveCurrentSessionCoreAsync(
+        SessionCheckpoint checkpoint,
+        ContextCapsule? contextCapsule,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(checkpoint);
@@ -44,6 +72,14 @@ public sealed partial class TodayPlanStore
                 transaction,
                 checkpoint,
                 cancellationToken);
+            if (contextCapsule is not null)
+            {
+                await UpsertContextCapsuleAsync(
+                    connection,
+                    transaction,
+                    contextCapsule,
+                    cancellationToken);
+            }
 
             await transaction.CommitAsync(cancellationToken);
         }
@@ -88,7 +124,11 @@ public sealed partial class TodayPlanStore
                        completed_at_utc,
                        parked_at_utc,
                        day_closed_at_utc,
-                       parked_next_physical_action
+                       parked_next_physical_action,
+                       abandoned_at_utc,
+                       break_limit_ticks,
+                       break_prompt_kind,
+                       break_prompt_text
                 FROM current_session_checkpoint
                 WHERE slot = 1;
                 """;
@@ -145,7 +185,11 @@ public sealed partial class TodayPlanStore
                 completed_at_utc,
                 parked_at_utc,
                 day_closed_at_utc,
-                parked_next_physical_action)
+                parked_next_physical_action,
+                abandoned_at_utc,
+                break_limit_ticks,
+                break_prompt_kind,
+                break_prompt_text)
             VALUES (
                 1,
                 $sessionId,
@@ -166,7 +210,11 @@ public sealed partial class TodayPlanStore
                 $completedAtUtc,
                 $parkedAtUtc,
                 $dayClosedAtUtc,
-                $parkedNextPhysicalAction)
+                $parkedNextPhysicalAction,
+                $abandonedAtUtc,
+                $breakLimitTicks,
+                $breakPromptKind,
+                $breakPromptText)
             ON CONFLICT(slot) DO UPDATE SET
                 session_id = excluded.session_id,
                 task_id = excluded.task_id,
@@ -186,7 +234,11 @@ public sealed partial class TodayPlanStore
                 completed_at_utc = excluded.completed_at_utc,
                 parked_at_utc = excluded.parked_at_utc,
                 day_closed_at_utc = excluded.day_closed_at_utc,
-                parked_next_physical_action = excluded.parked_next_physical_action;
+                parked_next_physical_action = excluded.parked_next_physical_action,
+                abandoned_at_utc = excluded.abandoned_at_utc,
+                break_limit_ticks = excluded.break_limit_ticks,
+                break_prompt_kind = excluded.break_prompt_kind,
+                break_prompt_text = excluded.break_prompt_text;
             """;
         command.Parameters.AddWithValue("$sessionId", FormatSessionId(checkpoint.Id));
         command.Parameters.AddWithValue("$taskId", FormatTaskId(checkpoint.TaskId));
@@ -215,6 +267,19 @@ public sealed partial class TodayPlanStore
         command.Parameters.AddWithValue(
             "$parkedNextPhysicalAction",
             (object?)checkpoint.ParkedNextPhysicalAction ?? DBNull.Value);
+        AddNullableTimestampParameter(command, "$abandonedAtUtc", checkpoint.AbandonedAtUtc);
+        command.Parameters.AddWithValue(
+            "$breakLimitTicks",
+            checkpoint.BreakPlan is null
+                ? DBNull.Value
+                : checkpoint.BreakPlan.Duration.Ticks);
+        AddNullableEnumParameter(
+            command,
+            "$breakPromptKind",
+            checkpoint.BreakPlan?.Prompt.Kind);
+        command.Parameters.AddWithValue(
+            "$breakPromptText",
+            (object?)checkpoint.BreakPlan?.Prompt.Text ?? DBNull.Value);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -264,6 +329,9 @@ public sealed partial class TodayPlanStore
             SessionCheckpointState.LimitReached => TaskState.Active,
             SessionCheckpointState.Completed => TaskState.Completed,
             SessionCheckpointState.Parked => TaskState.Parked,
+            SessionCheckpointState.BreakCompleted => GetOutcomeTaskState(
+                checkpoint.PriorOutcome),
+            SessionCheckpointState.Abandoned => TaskState.Deferred,
             SessionCheckpointState.RecoveryRequired
                 when checkpoint.RecoveryPhase == ActiveSessionPhase.Break =>
                     GetOutcomeTaskState(checkpoint.PriorOutcome),
@@ -351,6 +419,7 @@ public sealed partial class TodayPlanStore
         return state is SessionCheckpointState.Ready
             or SessionCheckpointState.Paused
             or SessionCheckpointState.LimitReached
+            or SessionCheckpointState.BreakCompleted
             or SessionCheckpointState.RecoveryRequired;
     }
 
@@ -389,7 +458,9 @@ public sealed partial class TodayPlanStore
                 ReadNullableTimestamp(reader, 15, "completion timestamp", sessionIdText),
                 ReadNullableTimestamp(reader, 16, "parking timestamp", sessionIdText),
                 ReadNullableTimestamp(reader, 17, "day-close timestamp", sessionIdText),
-                reader.IsDBNull(18) ? null : reader.GetString(18));
+                reader.IsDBNull(18) ? null : reader.GetString(18),
+                ReadNullableTimestamp(reader, 19, "abandonment timestamp", sessionIdText),
+                ReadBreakPlan(reader, sessionIdText));
         }
         catch (Exception exception) when (
             exception is ArgumentException or FormatException or OverflowException)
@@ -398,6 +469,36 @@ public sealed partial class TodayPlanStore
                 $"Stored session '{sessionIdText}' is invalid.",
                 exception);
         }
+    }
+
+    private static BreakPlan? ReadBreakPlan(SqliteDataReader reader, string sessionIdText)
+    {
+        bool hasLimit = !reader.IsDBNull(20);
+        bool hasKind = !reader.IsDBNull(21);
+        bool hasText = !reader.IsDBNull(22);
+        if (!hasLimit && !hasKind && !hasText)
+        {
+            return null;
+        }
+
+        if (!hasLimit || !hasKind || !hasText)
+        {
+            throw new InvalidDataException(
+                $"Stored session '{sessionIdText}' has incomplete Break data.");
+        }
+
+        BreakPromptKind kind = ParseEnum<BreakPromptKind>(reader.GetString(21), sessionIdText);
+        string storedText = reader.GetString(22);
+        BreakPrompt prompt = kind == BreakPromptKind.UserSelectedMovement
+            ? new BreakPrompt(kind, storedText)
+            : new BreakPrompt(kind);
+        if (!string.Equals(prompt.Text, storedText, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"Stored session '{sessionIdText}' has an invalid built-in Break prompt.");
+        }
+
+        return new BreakPlan(TimeSpan.FromTicks(reader.GetInt64(20)), prompt);
     }
 
     private static TEnum? ReadNullableEnum<TEnum>(

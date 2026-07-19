@@ -22,15 +22,21 @@ The known WinUI generated-file workspace diagnostic is informational only when
 - Today-domain validation, ordering, exact SQLite round trips, mutation rollback, soft
   deletion, cancellation, corrupt data, migration upgrades, and foreign-key integrity.
 - Count-up and countdown projections at, before, and beyond the limit; positive overtime;
-  the full state/command matrix; pause/resume; Landing; extension; terminal outcomes.
+  the full state/command matrix; pause/resume; Landing; extension; terminal outcomes;
+  bounded Break completion; explicit abandonment; and confirmed return states.
 - Fixed-seed transition sequences, restart with a new monotonic origin, UTC changes,
   suspension/recovery, and bounded explicit inclusion of away time without timing sleeps.
+- Atomic Park-plus-Context-Capsule storage, capsule retention, Break defaults, version 3
+  migration upgrades/rollback, Break restart, and corrupt-data handling.
 - Task-editor validation, timer-text formatting from authoritative `SessionView` values,
-  legal focus-control policy, and recovery affordances.
+  legal focus-control policy, and Focus/Break recovery affordances.
 - A static WinUI contract check that normal Focus content contains the label and segmented
   timer, keeps controls/recovery overlays collapsed, has no progress bar, separates the
   colon glyph so blinking cannot move layout, and gives focus controls 44-pixel minimum
   touch height.
+- A static Break contract check that the surface starts collapsed, renders exactly one
+  prompt, delays return context until the final portion, has no progress bar, and uses
+  44-pixel minimum action targets.
 
 SQLite tests use unique temporary database paths and never access the packaged user's
 LocalState. WinUI controls are not instantiated in the MTP test process because the
@@ -39,13 +45,15 @@ test harness.
 
 ## Windows UI verification
 
-Run the [Prompt 5 manual test script](prompt-5-manual-test-script.md) on Windows 11 for
+Run the [Prompt 6 manual test script](prompt-6-manual-test-script.md) on Windows 11 for
 packaged launch, CRUD/reordering, full-screen layout, keyboard and touch paths, transient
-controls, exact user-visible timer behavior, restart recovery, high contrast, text
-scaling, and Reduced Motion. Hardware suspend/Modern Standby remains a manual integration
-check and does not justify a background service.
+controls, exact user-visible timer behavior, Landing/Park/Break/return, restart recovery,
+high contrast, text scaling, and Reduced Motion. The
+[Prompt 5 script](prompt-5-manual-test-script.md) remains the baseline Today/Focus check.
+Hardware suspend/Modern Standby remains a manual integration check and does not justify a
+background service.
 
 Later P0 milestones must add deterministic schedule repair, Fixed/shutdown protection,
-approval/undo, Break UI, and the complete Context Capsule restoration flow. Prototype
+approval/undo, and general history. Prototype
 success still requires 10–14 real working days without lost state, invented time, silent
 Fixed movement, or cloud availability.

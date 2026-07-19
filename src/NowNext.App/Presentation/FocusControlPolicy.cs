@@ -26,7 +26,7 @@ public static class FocusControlPolicy
             or LimitReachedSessionState
             or OvertimeSessionState
             or LandingSessionState
-            or RecoveryRequiredSessionState;
+            or RecoveryRequiredSessionState { InterruptedPhase: not ActiveSessionPhase.Break };
         bool focusBoundary = state is LimitReachedSessionState
         {
             Boundary: SessionBoundary.FocusLimit,

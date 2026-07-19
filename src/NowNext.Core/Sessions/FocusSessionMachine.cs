@@ -48,7 +48,8 @@ public static class FocusSessionMachine
             ExtendSession extension => Extend(session, extension, timeProvider, timestamp),
             CompleteSession => Complete(session, timeProvider, timestamp, utcNow),
             ParkSession park => Park(session, park, timeProvider, timestamp, utcNow),
-            BeginBreak => StartBreak(session, timestamp),
+            AbandonSession => Abandon(session, timeProvider, timestamp, utcNow),
+            BeginBreak beginBreak => StartBreak(session, beginBreak, timestamp),
             EndBreak => FinishBreak(session, timeProvider, timestamp),
             InterruptSession => Interrupt(session, timeProvider, timestamp, utcNow),
             ResumeWithoutAwayTime => Recover(session, TimeSpan.Zero, timestamp),
@@ -101,7 +102,21 @@ public static class FocusSessionMachine
                 utcNow,
                 @break.PriorOutcome,
                 @break.OutcomeAtUtc,
-                @break.ParkedNextPhysicalAction),
+                @break.ParkedNextPhysicalAction,
+                @break.Plan),
+            BreakCompletedSessionState @break => CreateCheckpoint(
+                current,
+                SessionCheckpointState.BreakCompleted,
+                utcNow,
+                priorOutcome: @break.PriorOutcome,
+                completedAtUtc: @break.PriorOutcome == SessionOutcome.Completed
+                    ? @break.OutcomeAtUtc
+                    : null,
+                parkedAtUtc: @break.PriorOutcome == SessionOutcome.Parked
+                    ? @break.OutcomeAtUtc
+                    : null,
+                parkedNextPhysicalAction: @break.ParkedNextPhysicalAction,
+                breakPlan: @break.Plan),
             CompletedSessionState completed => CreateCheckpoint(
                 current,
                 SessionCheckpointState.Completed,
@@ -113,13 +128,19 @@ public static class FocusSessionMachine
                 utcNow,
                 parkedAtUtc: parked.ParkedAtUtc,
                 parkedNextPhysicalAction: parked.NextPhysicalAction),
+            AbandonedSessionState abandoned => CreateCheckpoint(
+                current,
+                SessionCheckpointState.Abandoned,
+                utcNow,
+                abandonedAtUtc: abandoned.AbandonedAtUtc),
             RecoveryRequiredSessionState recovery => CreateRecoveryCheckpoint(
                 current,
                 recovery.InterruptedPhase,
                 recovery.CheckpointedAtUtc,
                 recovery.PriorOutcome,
                 recovery.OutcomeAtUtc,
-                recovery.ParkedNextPhysicalAction),
+                recovery.ParkedNextPhysicalAction,
+                recovery.BreakPlan),
             DayClosedSessionState closed => CreateCheckpoint(
                 current,
                 SessionCheckpointState.DayClosed,
@@ -157,13 +178,21 @@ public static class FocusSessionMachine
             SessionCheckpointState.Parked => new ParkedSessionState(
                 checkpoint.ParkedAtUtc!.Value,
                 checkpoint.ParkedNextPhysicalAction!),
+            SessionCheckpointState.BreakCompleted => new BreakCompletedSessionState(
+                checkpoint.BreakPlan!,
+                checkpoint.PriorOutcome!.Value,
+                GetOutcomeTimestamp(checkpoint)!.Value,
+                checkpoint.ParkedNextPhysicalAction),
+            SessionCheckpointState.Abandoned => new AbandonedSessionState(
+                checkpoint.AbandonedAtUtc!.Value),
             SessionCheckpointState.RecoveryRequired => new RecoveryRequiredSessionState(
                 checkpoint.RecoveryPhase!.Value,
                 checkpoint.CheckpointedAtUtc,
                 detectedAtUtc,
                 checkpoint.PriorOutcome,
                 GetOutcomeTimestamp(checkpoint),
-                checkpoint.ParkedNextPhysicalAction),
+                checkpoint.ParkedNextPhysicalAction,
+                checkpoint.BreakPlan),
             SessionCheckpointState.DayClosed => new DayClosedSessionState(
                 checkpoint.DayClosedAtUtc!.Value,
                 checkpoint.PriorOutcome,
@@ -206,9 +235,16 @@ public static class FocusSessionMachine
                 LandingLimit),
             LimitReachedSessionState { Boundary: SessionBoundary.LandingLimit } =>
                 new LandingTimerReading(LandingLimit, LandingLimit),
-            BreakSessionState => new BreakTimerReading(current.BreakDuration),
-            RecoveryRequiredSessionState { InterruptedPhase: ActiveSessionPhase.Break } =>
-                new BreakTimerReading(current.BreakDuration),
+            BreakSessionState @break => new BreakTimerReading(
+                current.BreakDuration,
+                @break.Plan.Duration),
+            BreakCompletedSessionState @break => new BreakTimerReading(
+                @break.Plan.Duration,
+                @break.Plan.Duration),
+            RecoveryRequiredSessionState { InterruptedPhase: ActiveSessionPhase.Break } recovery =>
+                new BreakTimerReading(
+                    current.BreakDuration,
+                    recovery.BreakPlan!.Duration),
             RecoveryRequiredSessionState { InterruptedPhase: ActiveSessionPhase.Landing } =>
                 new LandingTimerReading(current.LandingDuration, LandingLimit),
             RecoveryRequiredSessionState => CreateFocusReading(current),
@@ -336,7 +372,7 @@ public static class FocusSessionMachine
             or LimitReachedSessionState
             or OvertimeSessionState
             or LandingSessionState
-            or RecoveryRequiredSessionState))
+            or RecoveryRequiredSessionState { InterruptedPhase: not ActiveSessionPhase.Break }))
         {
             return Invalid(session, nameof(CompleteSession));
         }
@@ -360,7 +396,7 @@ public static class FocusSessionMachine
             or LimitReachedSessionState
             or OvertimeSessionState
             or LandingSessionState
-            or RecoveryRequiredSessionState))
+            or RecoveryRequiredSessionState { InterruptedPhase: not ActiveSessionPhase.Break }))
         {
             return Invalid(session, nameof(ParkSession));
         }
@@ -371,7 +407,33 @@ public static class FocusSessionMachine
             current.Signal);
     }
 
-    private static SessionTransition StartBreak(FocusSession session, long timestamp)
+    private static SessionTransition Abandon(
+        FocusSession session,
+        TimeProvider timeProvider,
+        long timestamp,
+        DateTimeOffset utcNow)
+    {
+        if (session.State is not (
+            FocusingSessionState
+            or PausedSessionState
+            or LimitReachedSessionState
+            or OvertimeSessionState
+            or LandingSessionState
+            or RecoveryRequiredSessionState { InterruptedPhase: not ActiveSessionPhase.Break }))
+        {
+            return Invalid(session, nameof(AbandonSession));
+        }
+
+        SessionTransition current = Refresh(session, timeProvider, timestamp);
+        return Transition(
+            With(current.Session, new AbandonedSessionState(utcNow)),
+            current.Signal);
+    }
+
+    private static SessionTransition StartBreak(
+        FocusSession session,
+        BeginBreak command,
+        long timestamp)
     {
         return session.State switch
         {
@@ -380,6 +442,7 @@ public static class FocusSessionMachine
                     session,
                     new BreakSessionState(
                         timestamp,
+                        command.Plan,
                         SessionOutcome.Completed,
                         completed.CompletedAtUtc,
                         null))),
@@ -388,6 +451,7 @@ public static class FocusSessionMachine
                     session,
                     new BreakSessionState(
                         timestamp,
+                        command.Plan,
                         SessionOutcome.Parked,
                         parked.ParkedAtUtc,
                         parked.NextPhysicalAction))),
@@ -400,15 +464,33 @@ public static class FocusSessionMachine
         TimeProvider timeProvider,
         long timestamp)
     {
-        RequireState<BreakSessionState>(session, nameof(EndBreak));
-        FocusSession current = Refresh(session, timeProvider, timestamp).Session;
-        BreakSessionState @break = (BreakSessionState)current.State;
-        SessionState outcome = @break.PriorOutcome switch
+        if (session.State is not (BreakSessionState or BreakCompletedSessionState))
         {
-            SessionOutcome.Completed => new CompletedSessionState(@break.OutcomeAtUtc),
+            return Invalid(session, nameof(EndBreak));
+        }
+
+        FocusSession current = session.State is BreakSessionState
+            ? Refresh(session, timeProvider, timestamp).Session
+            : session;
+        (SessionOutcome priorOutcome, DateTimeOffset outcomeAtUtc, string? parkedAction) =
+            current.State switch
+            {
+                BreakSessionState running => (
+                    running.PriorOutcome,
+                    running.OutcomeAtUtc,
+                    running.ParkedNextPhysicalAction),
+                BreakCompletedSessionState completed => (
+                    completed.PriorOutcome,
+                    completed.OutcomeAtUtc,
+                    completed.ParkedNextPhysicalAction),
+                _ => throw new InvalidOperationException("Break normalization is invalid."),
+            };
+        SessionState outcome = priorOutcome switch
+        {
+            SessionOutcome.Completed => new CompletedSessionState(outcomeAtUtc),
             SessionOutcome.Parked => new ParkedSessionState(
-                @break.OutcomeAtUtc,
-                @break.ParkedNextPhysicalAction!),
+                outcomeAtUtc,
+                parkedAction!),
             _ => throw new InvalidOperationException("Break outcome is invalid."),
         };
         return Transition(With(current, outcome));
@@ -450,7 +532,8 @@ public static class FocusSessionMachine
                 utcNow,
                 @break.PriorOutcome,
                 @break.OutcomeAtUtc,
-                @break.ParkedNextPhysicalAction),
+                @break.ParkedNextPhysicalAction,
+                @break.Plan),
             LimitReachedSessionState => current.Session.State,
             _ => throw new InvalidOperationException(
                 "Interruption normalization produced an invalid state."),
@@ -539,15 +622,33 @@ public static class FocusSessionMachine
         TimeSpan includedAwayTime,
         long timestamp)
     {
+        BreakPlan plan = recovery.BreakPlan!;
+        TimeSpan remaining = plan.Duration - session.BreakDuration;
+        if (includedAwayTime > remaining)
+        {
+            throw new InvalidOperationException(
+                "Included away time exceeds the remaining Break duration.");
+        }
+
+        TimeSpan breakDuration = Add(session.BreakDuration, includedAwayTime);
+        bool reached = breakDuration == plan.Duration;
         return Transition(
             With(
                 session,
-                new BreakSessionState(
-                    timestamp,
-                    recovery.PriorOutcome!.Value,
-                    recovery.OutcomeAtUtc!.Value,
-                    recovery.ParkedNextPhysicalAction),
-                breakDuration: Add(session.BreakDuration, includedAwayTime)));
+                reached
+                    ? new BreakCompletedSessionState(
+                        plan,
+                        recovery.PriorOutcome!.Value,
+                        recovery.OutcomeAtUtc!.Value,
+                        recovery.ParkedNextPhysicalAction)
+                    : new BreakSessionState(
+                        timestamp,
+                        plan,
+                        recovery.PriorOutcome!.Value,
+                        recovery.OutcomeAtUtc!.Value,
+                        recovery.ParkedNextPhysicalAction),
+                breakDuration: breakDuration),
+            reached ? SessionSignal.BreakLimitReached : SessionSignal.None);
     }
 
     private static SessionTransition Close(
@@ -572,6 +673,11 @@ public static class FocusSessionMachine
                 parked.ParkedAtUtc,
                 parked.NextPhysicalAction),
             BreakSessionState @break => new DayClosedSessionState(
+                utcNow,
+                @break.PriorOutcome,
+                @break.OutcomeAtUtc,
+                @break.ParkedNextPhysicalAction),
+            BreakCompletedSessionState @break => new DayClosedSessionState(
                 utcNow,
                 @break.PriorOutcome,
                 @break.OutcomeAtUtc,
@@ -692,15 +798,27 @@ public static class FocusSessionMachine
             timeProvider,
             @break.SegmentStartedTimestamp,
             timestamp);
+        TimeSpan remaining = @break.Plan.Duration - session.BreakDuration;
+        TimeSpan credited = elapsed > remaining ? remaining : elapsed;
+        TimeSpan breakDuration = Add(session.BreakDuration, credited);
+        bool reached = breakDuration == @break.Plan.Duration;
         return Transition(
             With(
                 session,
-                new BreakSessionState(
-                    timestamp,
-                    @break.PriorOutcome,
-                    @break.OutcomeAtUtc,
-                    @break.ParkedNextPhysicalAction),
-                breakDuration: Add(session.BreakDuration, elapsed)));
+                reached
+                    ? new BreakCompletedSessionState(
+                        @break.Plan,
+                        @break.PriorOutcome,
+                        @break.OutcomeAtUtc,
+                        @break.ParkedNextPhysicalAction)
+                    : new BreakSessionState(
+                        timestamp,
+                        @break.Plan,
+                        @break.PriorOutcome,
+                        @break.OutcomeAtUtc,
+                        @break.ParkedNextPhysicalAction),
+                breakDuration: breakDuration),
+            reached ? SessionSignal.BreakLimitReached : SessionSignal.None);
     }
 
     private static SessionCheckpoint CreateRecoveryCheckpoint(
@@ -709,7 +827,8 @@ public static class FocusSessionMachine
         DateTimeOffset checkpointedAtUtc,
         SessionOutcome? priorOutcome = null,
         DateTimeOffset? outcomeAtUtc = null,
-        string? parkedNextPhysicalAction = null)
+        string? parkedNextPhysicalAction = null,
+        BreakPlan? breakPlan = null)
     {
         return CreateCheckpoint(
             session,
@@ -719,7 +838,8 @@ public static class FocusSessionMachine
             priorOutcome: priorOutcome,
             completedAtUtc: priorOutcome == SessionOutcome.Completed ? outcomeAtUtc : null,
             parkedAtUtc: priorOutcome == SessionOutcome.Parked ? outcomeAtUtc : null,
-            parkedNextPhysicalAction: parkedNextPhysicalAction);
+            parkedNextPhysicalAction: parkedNextPhysicalAction,
+            breakPlan: breakPlan);
     }
 
     private static SessionCheckpoint CreateCheckpoint(
@@ -733,7 +853,9 @@ public static class FocusSessionMachine
         DateTimeOffset? completedAtUtc = null,
         DateTimeOffset? parkedAtUtc = null,
         DateTimeOffset? dayClosedAtUtc = null,
-        string? parkedNextPhysicalAction = null)
+        string? parkedNextPhysicalAction = null,
+        DateTimeOffset? abandonedAtUtc = null,
+        BreakPlan? breakPlan = null)
     {
         return new SessionCheckpoint(
             session.Id,
@@ -754,7 +876,9 @@ public static class FocusSessionMachine
             completedAtUtc,
             parkedAtUtc,
             dayClosedAtUtc,
-            parkedNextPhysicalAction);
+            parkedNextPhysicalAction,
+            abandonedAtUtc,
+            breakPlan);
     }
 
     private static TimerReading CreateFocusReading(FocusSession session)

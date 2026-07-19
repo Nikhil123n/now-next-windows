@@ -72,11 +72,14 @@ refresh changes presentation latency, not elapsed time. Persist committed active
 and recovery checkpoints rather than trusting a continuously running UI timer.
 
 Session state is immutable and transitions are explicit across Ready, Focusing, Paused,
-LimitReached, Overtime, Landing, Break, Completed, Parked, RecoveryRequired, and
-DayClosed. State-specific values replace unrelated booleans. Count-up and countdown are
+LimitReached, Overtime, Landing, Break, BreakCompleted, Completed, Parked, Abandoned,
+RecoveryRequired, and DayClosed. State-specific values replace unrelated booleans.
+Count-up and countdown are
 projections over the same active elapsed value and approved limit; both use positive
 overtime after that limit. Landing is an explicit five-minute active phase. Break elapsed
-is separate from focus elapsed.
+is separate from focus elapsed, stops at its approved limit, and then waits for an
+explicit return command. Parking requires a next action; explicit Abandon is the distinct
+terminal route when the user will not resume the task.
 
 On restart, crash, sleep, resume, or long absence, present an explicit recovery choice.
 Unobserved time is excluded unless the user deliberately includes it. Count-up and
@@ -87,7 +90,7 @@ foreground `DispatcherQueueTimer` requests read-only Core projections for render
 periodic persisted checkpoints; it never increments elapsed time and stops outside the
 Focus surface. There is no actor, channel, hosted service, or background worker.
 
-The WinUI layer uses direct code-behind composition because there are only two screens
+The WinUI layer uses direct code-behind composition because there are only three screens
 and no reusable application-service graph. Today mutations call the concrete store and
 reload the immutable plan. Focus commands call `FocusSessionRuntime`; the view formats
 only its `SessionView`. Introducing MVVM infrastructure or another layer requires a
@@ -105,10 +108,11 @@ critical data before reporting success to the UI.
 
 The App stores `now-next.db` under the package user's LocalState directory. Schema version
 1 supports create, edit, soft delete, reorder, and load for the injected clock's local
-day. Prompt 4 adds schema version 2 for the single durable current-session checkpoint.
-See [the SQLite schema contract](docs/sqlite-schema.md). Task rows are retained after
-schedule deletion so current and future session records can keep stable references, but
-no session-history table exists yet.
+day. Version 2 adds the single durable current-session checkpoint. Version 3 extends that
+checkpoint for bounded Break recovery and adds minimal Context Capsules and Break
+settings. Park, task lifecycle, checkpoint, and capsule changes commit atomically. See
+[the SQLite schema contract](docs/sqlite-schema.md). Task rows and capsules are retained
+after schedule deletion, but no general session-history table exists yet.
 
 Maintain an ordered schema-migration table. Once a migration reaches `main`, never edit,
 renumber, or reuse it; add a forward migration. Migration application is transactional

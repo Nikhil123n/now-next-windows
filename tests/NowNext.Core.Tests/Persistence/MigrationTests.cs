@@ -18,7 +18,7 @@ public sealed class MigrationTests
 
     [TestMethod]
     [Timeout(10_000, CooperativeCancellation = true)]
-    public async System.Threading.Tasks.Task InitializeEmptyDatabaseRecordsBothMigrationsOnce()
+    public async System.Threading.Tasks.Task InitializeEmptyDatabaseRecordsAllMigrationsOnce()
     {
         using var database = new TestDatabase();
         using var store = CreateStore(database);
@@ -29,14 +29,14 @@ public sealed class MigrationTests
             database,
             _testContext.CancellationToken);
 
-        Assert.AreEqual(2L, version);
-        Assert.AreEqual("current_focus_session_checkpoint", name);
-        Assert.AreEqual(2L, count);
+        Assert.AreEqual(3L, version);
+        Assert.AreEqual("context_capsules_and_break_recovery", name);
+        Assert.AreEqual(3L, count);
     }
 
     [TestMethod]
     [Timeout(10_000, CooperativeCancellation = true)]
-    public async System.Threading.Tasks.Task InitializeVersionOneDatabaseAppliesVersionTwo()
+    public async System.Threading.Tasks.Task InitializeVersionOneDatabaseAppliesRemainingMigrations()
     {
         using var database = new TestDatabase();
         await CreateVersionOneDatabaseAsync(database, _testContext.CancellationToken);
@@ -51,9 +51,9 @@ public sealed class MigrationTests
             "current_session_checkpoint",
             _testContext.CancellationToken);
 
-        Assert.AreEqual(2L, version);
-        Assert.AreEqual("current_focus_session_checkpoint", name);
-        Assert.AreEqual(2L, count);
+        Assert.AreEqual(3L, version);
+        Assert.AreEqual("context_capsules_and_break_recovery", name);
+        Assert.AreEqual(3L, count);
         Assert.AreEqual(1L, checkpointTableCount);
     }
 
@@ -108,6 +108,57 @@ public sealed class MigrationTests
 
     [TestMethod]
     [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task InitializeVersionTwoDatabaseAppliesVersionThree()
+    {
+        using var database = new TestDatabase();
+        await CreateVersionTwoDatabaseAsync(database, _testContext.CancellationToken);
+        using var store = CreateStore(database);
+
+        await store.InitializeAsync(_testContext.CancellationToken);
+        (long version, string name, long count) = await ReadMigrationAsync(
+            database,
+            _testContext.CancellationToken);
+        long capsuleTable = await ReadSchemaObjectCountAsync(
+            database,
+            "context_capsules",
+            _testContext.CancellationToken);
+        long settingsTable = await ReadSchemaObjectCountAsync(
+            database,
+            "break_settings",
+            _testContext.CancellationToken);
+
+        Assert.AreEqual(3L, version);
+        Assert.AreEqual("context_capsules_and_break_recovery", name);
+        Assert.AreEqual(3L, count);
+        Assert.AreEqual(1L, capsuleTable);
+        Assert.AreEqual(1L, settingsTable);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task ConflictingVersionThreeSchemaRollsBackMigration()
+    {
+        using var database = new TestDatabase();
+        await CreateVersionTwoDatabaseAsync(database, _testContext.CancellationToken);
+        await ExecuteAsync(
+            database,
+            "CREATE TABLE context_capsules (sentinel TEXT NOT NULL);",
+            _testContext.CancellationToken);
+        using var store = CreateStore(database);
+
+        await Assert.ThrowsExactlyAsync<TodayPlanStorageException>(
+            async () => await store.InitializeAsync(_testContext.CancellationToken));
+        (long version, string name, long count) = await ReadMigrationAsync(
+            database,
+            _testContext.CancellationToken);
+
+        Assert.AreEqual(2L, version);
+        Assert.AreEqual("current_focus_session_checkpoint", name);
+        Assert.AreEqual(2L, count);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
     public async System.Threading.Tasks.Task InitializeUnknownFutureVersionThrowsUnderstandableFailure()
     {
         using var database = new TestDatabase();
@@ -120,7 +171,7 @@ public sealed class MigrationTests
                 applied_utc TEXT NOT NULL
             );
             INSERT INTO schema_migrations(version, name, applied_utc)
-            VALUES (3, 'future', '2026-07-18T00:00:00.0000000+00:00');
+            VALUES (4, 'future', '2026-07-18T00:00:00.0000000+00:00');
             """,
             _testContext.CancellationToken);
         using var store = CreateStore(database);
@@ -129,7 +180,7 @@ public sealed class MigrationTests
             await Assert.ThrowsExactlyAsync<TodayPlanStorageException>(
                 async () => await store.InitializeAsync(_testContext.CancellationToken));
 
-        Assert.Contains("version 3", exception.Message);
+        Assert.Contains("version 4", exception.Message);
         Assert.Contains("unknown or non-contiguous", exception.Message);
     }
 
@@ -217,6 +268,34 @@ public sealed class MigrationTests
         Assert.AreEqual(19, exception.SqliteErrorCode);
     }
 
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task VersionThreeSchemaEnforcesCapsuleTaskForeignKey()
+    {
+        using var database = new TestDatabase();
+        using var store = CreateStore(database);
+        await store.InitializeAsync(_testContext.CancellationToken);
+
+        SqliteException exception = await Assert.ThrowsExactlyAsync<SqliteException>(
+            async () => await ExecuteAsync(
+                database,
+                """
+                INSERT INTO context_capsules(
+                    session_id,
+                    task_id,
+                    next_physical_action,
+                    saved_at_utc)
+                VALUES (
+                    '00000000-0000-0000-0000-000000000001',
+                    '00000000-0000-0000-0000-000000000002',
+                    'Open the draft',
+                    '2026-07-18T00:00:00.0000000+00:00');
+                """,
+                _testContext.CancellationToken));
+
+        Assert.AreEqual(19, exception.SqliteErrorCode);
+    }
+
     private static TodayPlanStore CreateStore(TestDatabase database)
     {
         return new TodayPlanStore(database.DatabasePath, new FixedTimeProvider(FixedNow));
@@ -256,6 +335,29 @@ public sealed class MigrationTests
             {migrationSql}
             INSERT INTO schema_migrations(version, name, applied_utc)
             VALUES (1, 'initial_today_plan', '2026-07-18T00:00:00.0000000+00:00');
+            """,
+            cancellationToken);
+    }
+
+    private static async System.Threading.Tasks.Task CreateVersionTwoDatabaseAsync(
+        TestDatabase database,
+        CancellationToken cancellationToken)
+    {
+        await CreateVersionOneDatabaseAsync(database, cancellationToken);
+        const string resourceName =
+            "NowNext.App.Persistence.Migrations.0002_current_focus_session_checkpoint.sql";
+        await using Stream stream = typeof(TodayPlanStore).Assembly
+            .GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException("The version 2 migration is missing.");
+        using var reader = new StreamReader(stream);
+        string migrationSql = await reader.ReadToEndAsync(cancellationToken);
+        await ExecuteAsync(
+            database,
+            $"""
+            {migrationSql}
+            INSERT INTO schema_migrations(version, name, applied_utc)
+            VALUES (2, 'current_focus_session_checkpoint',
+                '2026-07-18T00:00:00.0000000+00:00');
             """,
             cancellationToken);
     }

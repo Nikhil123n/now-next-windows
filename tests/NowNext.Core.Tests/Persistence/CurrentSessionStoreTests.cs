@@ -88,6 +88,13 @@ public sealed class CurrentSessionStoreTests
             CreateCheckpoint(
                 task,
                 id: sessionId,
+                state: SessionCheckpointState.Abandoned,
+                committedActiveDuration: TimeSpan.FromMinutes(48),
+                startedAtUtc: FixedNow.AddMinutes(-50),
+                abandonedAtUtc: FixedNow),
+            CreateCheckpoint(
+                task,
+                id: sessionId,
                 state: SessionCheckpointState.DayClosed,
                 committedActiveDuration: TimeSpan.FromMinutes(48),
                 priorOutcome: SessionOutcome.Parked,
@@ -147,7 +154,10 @@ public sealed class CurrentSessionStoreTests
             recoveryPhase: ActiveSessionPhase.Break,
             priorOutcome: SessionOutcome.Completed,
             startedAtUtc: FixedNow.AddMinutes(-3),
-            completedAtUtc: FixedNow.AddMinutes(-1));
+            completedAtUtc: FixedNow.AddMinutes(-1),
+            breakPlan: new BreakPlan(
+                TimeSpan.FromMinutes(5),
+                new BreakPrompt(BreakPromptKind.Water)));
 
         await store.SaveCurrentSessionAsync(paused, _testContext.CancellationToken);
         DomainTask activeTask = await LoadOnlyTaskAsync(store);
@@ -324,7 +334,9 @@ public sealed class CurrentSessionStoreTests
         DateTimeOffset? completedAtUtc = null,
         DateTimeOffset? parkedAtUtc = null,
         DateTimeOffset? dayClosedAtUtc = null,
-        string? parkedNextPhysicalAction = null)
+        string? parkedNextPhysicalAction = null,
+        DateTimeOffset? abandonedAtUtc = null,
+        BreakPlan? breakPlan = null)
     {
         return new SessionCheckpoint(
             id ?? new SessionId(Guid.NewGuid()),
@@ -345,7 +357,9 @@ public sealed class CurrentSessionStoreTests
             completedAtUtc,
             parkedAtUtc,
             dayClosedAtUtc,
-            parkedNextPhysicalAction);
+            parkedNextPhysicalAction,
+            abandonedAtUtc,
+            breakPlan);
     }
 
     private static void AssertCheckpointEqual(
@@ -371,6 +385,8 @@ public sealed class CurrentSessionStoreTests
         Assert.AreEqual(expected.ParkedAtUtc, actual.ParkedAtUtc);
         Assert.AreEqual(expected.DayClosedAtUtc, actual.DayClosedAtUtc);
         Assert.AreEqual(expected.ParkedNextPhysicalAction, actual.ParkedNextPhysicalAction);
+        Assert.AreEqual(expected.AbandonedAtUtc, actual.AbandonedAtUtc);
+        Assert.AreEqual(expected.BreakPlan, actual.BreakPlan);
     }
 
     private static async System.Threading.Tasks.Task CorruptSessionStateAsync(

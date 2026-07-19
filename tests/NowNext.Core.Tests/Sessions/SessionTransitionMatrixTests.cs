@@ -94,7 +94,7 @@ public sealed class SessionTransitionMatrixTests
                 "Focusing",
                 static (session, clock) => Apply(session, clock, new StartSession()),
                 typeof(RefreshSession), typeof(PauseSession), typeof(CompleteSession),
-                typeof(ParkSession), typeof(InterruptSession)),
+                typeof(ParkSession), typeof(AbandonSession), typeof(InterruptSession)),
             CreateCase(
                 "Paused",
                 static (session, clock) => Apply(
@@ -102,18 +102,19 @@ public sealed class SessionTransitionMatrixTests
                     clock,
                     new PauseSession()),
                 typeof(RefreshSession), typeof(ResumeSession), typeof(CompleteSession),
-                typeof(ParkSession)),
+                typeof(ParkSession), typeof(AbandonSession)),
             CreateCase(
                 "FocusLimitReached",
                 static (session, clock) => ReachFocusLimit(session, clock),
                 typeof(RefreshSession), typeof(ContinueOvertime), typeof(BeginLanding),
-                typeof(ExtendSession), typeof(CompleteSession), typeof(ParkSession)),
+                typeof(ExtendSession), typeof(CompleteSession), typeof(ParkSession),
+                typeof(AbandonSession)),
             CreateCase(
                 "Overtime",
                 static (session, clock) => ReachOvertime(session, clock),
                 typeof(RefreshSession), typeof(PauseSession), typeof(BeginLanding),
                 typeof(ExtendSession), typeof(CompleteSession), typeof(ParkSession),
-                typeof(InterruptSession)),
+                typeof(AbandonSession), typeof(InterruptSession)),
             CreateCase(
                 "Landing",
                 static (session, clock) => Apply(
@@ -121,12 +122,12 @@ public sealed class SessionTransitionMatrixTests
                     clock,
                     new BeginLanding()),
                 typeof(RefreshSession), typeof(ExtendSession), typeof(CompleteSession),
-                typeof(ParkSession), typeof(InterruptSession)),
+                typeof(ParkSession), typeof(AbandonSession), typeof(InterruptSession)),
             CreateCase(
                 "LandingLimitReached",
                 static (session, clock) => ReachLandingLimit(session, clock),
                 typeof(RefreshSession), typeof(ExtendSession), typeof(CompleteSession),
-                typeof(ParkSession)),
+                typeof(ParkSession), typeof(AbandonSession)),
             CreateCase(
                 "Completed",
                 static (session, clock) => Apply(
@@ -153,13 +154,39 @@ public sealed class SessionTransitionMatrixTests
                 typeof(RefreshSession), typeof(EndBreak), typeof(InterruptSession),
                 typeof(CloseDay)),
             CreateCase(
+                "BreakCompleted",
+                static (session, clock) => ReachBreakLimit(session, clock),
+                typeof(RefreshSession), typeof(EndBreak), typeof(CloseDay)),
+            CreateCase(
                 "RecoveryRequired",
                 static (session, clock) => Apply(
                     Apply(session, clock, new StartSession()),
                     clock,
                     new InterruptSession()),
                 typeof(RefreshSession), typeof(CompleteSession), typeof(ParkSession),
-                typeof(ResumeWithoutAwayTime), typeof(ResumeIncludingAwayTime)),
+                typeof(AbandonSession), typeof(ResumeWithoutAwayTime),
+                typeof(ResumeIncludingAwayTime)),
+            CreateCase(
+                "BreakRecoveryRequired",
+                static (session, clock) => Apply(
+                    Apply(
+                        Apply(
+                            Apply(session, clock, new StartSession()),
+                            clock,
+                            new CompleteSession()),
+                        clock,
+                        new BeginBreak()),
+                    clock,
+                    new InterruptSession()),
+                typeof(RefreshSession), typeof(ResumeWithoutAwayTime),
+                typeof(ResumeIncludingAwayTime)),
+            CreateCase(
+                "Abandoned",
+                static (session, clock) => Apply(
+                    Apply(session, clock, new StartSession()),
+                    clock,
+                    new AbandonSession()),
+                typeof(RefreshSession)),
             CreateCase(
                 "DayClosed",
                 static (session, clock) => Apply(session, clock, new CloseDay()),
@@ -180,6 +207,7 @@ public sealed class SessionTransitionMatrixTests
             new(typeof(ExtendSession), static () => new ExtendSession(TimeSpan.FromMinutes(1))),
             new(typeof(CompleteSession), static () => new CompleteSession()),
             new(typeof(ParkSession), static () => new ParkSession("Next action")),
+            new(typeof(AbandonSession), static () => new AbandonSession()),
             new(typeof(BeginBreak), static () => new BeginBreak()),
             new(typeof(EndBreak), static () => new EndBreak()),
             new(typeof(InterruptSession), static () => new InterruptSession()),
@@ -197,32 +225,41 @@ public sealed class SessionTransitionMatrixTests
             ReadySessionState => [new StartSession(), new RefreshSession(), new CloseDay()],
             FocusingSessionState =>
                 [new RefreshSession(), new PauseSession(), new CompleteSession(),
-                 new ParkSession("Next action"), new InterruptSession()],
+                 new ParkSession("Next action"), new AbandonSession(),
+                 new InterruptSession()],
             PausedSessionState =>
                 [new RefreshSession(), new ResumeSession(), new CompleteSession(),
-                 new ParkSession("Next action")],
+                 new ParkSession("Next action"), new AbandonSession()],
             LimitReachedSessionState { Boundary: SessionBoundary.FocusLimit } =>
                 [new RefreshSession(), new ContinueOvertime(), new BeginLanding(),
                  new ExtendSession(TimeSpan.FromMinutes(1)), new CompleteSession(),
-                 new ParkSession("Next action")],
+                 new ParkSession("Next action"), new AbandonSession()],
             LimitReachedSessionState =>
                 [new RefreshSession(), new ExtendSession(TimeSpan.FromMinutes(1)),
-                 new CompleteSession(), new ParkSession("Next action")],
+                 new CompleteSession(), new ParkSession("Next action"),
+                 new AbandonSession()],
             OvertimeSessionState =>
                 [new RefreshSession(), new PauseSession(), new BeginLanding(),
                  new ExtendSession(TimeSpan.FromMinutes(1)), new CompleteSession(),
-                 new ParkSession("Next action"), new InterruptSession()],
+                 new ParkSession("Next action"), new AbandonSession(),
+                 new InterruptSession()],
             LandingSessionState =>
                 [new RefreshSession(), new ExtendSession(TimeSpan.FromMinutes(1)),
-                 new CompleteSession(), new ParkSession("Next action"), new InterruptSession()],
+                 new CompleteSession(), new ParkSession("Next action"),
+                 new AbandonSession(), new InterruptSession()],
             CompletedSessionState or ParkedSessionState =>
                 [new RefreshSession(), new BeginBreak(), new CloseDay()],
             BreakSessionState =>
                 [new RefreshSession(), new EndBreak(), new InterruptSession(), new CloseDay()],
+            BreakCompletedSessionState => [new RefreshSession(), new EndBreak(), new CloseDay()],
+            RecoveryRequiredSessionState { InterruptedPhase: ActiveSessionPhase.Break } =>
+                [new RefreshSession(), new ResumeWithoutAwayTime(),
+                 new ResumeIncludingAwayTime(TimeSpan.Zero)],
             RecoveryRequiredSessionState =>
                 [new RefreshSession(), new ResumeWithoutAwayTime(),
                  new ResumeIncludingAwayTime(TimeSpan.Zero), new CompleteSession(),
-                 new ParkSession("Next action")],
+                 new ParkSession("Next action"), new AbandonSession()],
+            AbandonedSessionState => [new RefreshSession()],
             DayClosedSessionState => [new RefreshSession()],
             _ => throw new InvalidOperationException("The state is not represented by the test model."),
         };
@@ -255,6 +292,15 @@ public sealed class SessionTransitionMatrixTests
     private static FocusSession ReachLandingLimit(FocusSession session, SessionTestClock clock)
     {
         session = Apply(ReachFocusLimit(session, clock), clock, new BeginLanding());
+        clock.Advance(TimeSpan.FromMinutes(5));
+        return Apply(session, clock, new RefreshSession());
+    }
+
+    private static FocusSession ReachBreakLimit(FocusSession session, SessionTestClock clock)
+    {
+        session = Apply(session, clock, new StartSession());
+        session = Apply(session, clock, new CompleteSession());
+        session = Apply(session, clock, new BeginBreak());
         clock.Advance(TimeSpan.FromMinutes(5));
         return Apply(session, clock, new RefreshSession());
     }

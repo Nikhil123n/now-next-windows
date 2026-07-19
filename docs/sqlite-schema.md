@@ -1,13 +1,17 @@
 # SQLite Schema
 
-The current schema has two ordered versions. Prompt 3 introduced version 1 for the
+The current schema has three ordered versions. Prompt 3 introduced version 1 for the
 current local working day. Prompt 4 preserves that migration and adds version 2 for one
-durable current focus-session checkpoint; it does not add session history.
+durable current focus-session checkpoint. Prompt 6 adds version 3 for bounded Break
+recovery, Context Capsules, and the local Break default; it does not add general session
+history.
 
 The authoritative version 1 migration is
 [`0001_initial_today_plan.sql`](../src/NowNext.App/Persistence/Migrations/0001_initial_today_plan.sql).
 The authoritative version 2 migration is
 [`0002_current_focus_session_checkpoint.sql`](../src/NowNext.App/Persistence/Migrations/0002_current_focus_session_checkpoint.sql).
+The authoritative version 3 migration is
+[`0003_context_capsules_and_break_recovery.sql`](../src/NowNext.App/Persistence/Migrations/0003_context_capsules_and_break_recovery.sql).
 Once committed to `main`, a migration must not be edited; later changes use a new ordered
 migration.
 
@@ -62,10 +66,33 @@ process loss or suspension becomes RecoveryRequired; the new process starts a fr
 monotonic segment from committed duration. Session checkpoint and corresponding task
 lifecycle changes commit in the same explicit transaction.
 
+## Version 3 Context Capsule and Break recovery
+
+Version 3 rebuilds the single checkpoint table without discarding version 2 data. The
+new shape adds `Abandoned` and `BreakCompleted` durable states plus the bounded Break
+limit and one selected prompt required to restore a running or completed Break. Prompt
+kinds are restricted to distant gaze, water, jaw relaxation, shoulder release, stand,
+walk, or user-selected movement. A running Break is checkpointed as RecoveryRequired;
+Break elapsed is capped at its positive limit and BreakCompleted waits without accruing.
+
+`context_capsules` appends one capsule per parking session. Its session ID is the primary
+key; its retained task reference uses `ON DELETE RESTRICT`. Each record contains only the
+required next physical action, optional nonblank short note, invariant UTC save timestamp,
+task ID, and session ID. Loading a task selects its latest capsule by timestamp. Parking
+updates the task lifecycle, current checkpoint, and capsule inside one transaction before
+the runtime publishes success. Soft deletion removes only plan membership, so a saved
+capsule remains available.
+
+`break_settings` is an optional singleton row containing a positive default duration and
+optional nonblank user-selected movement. Absence of the row means the product default of
+five minutes. It is local presentation configuration, not an independent timer or health
+tracking model.
+
 ## Migration safety
 
 Initialization creates the migration registry and applies missing migrations in order in
 one transaction. Unknown, renamed, or non-contiguous applied versions stop initialization.
 A DDL conflict rolls back both the failed migration and the registry change. Tests cover
-fresh version 0 to version 2, retained version 1 to version 2, repeat initialization,
-rollback, future versions, checkpoint/task foreign keys, and corrupt checkpoint data.
+fresh version 0 to version 3, retained versions 1 and 2 to version 3, repeat
+initialization, rollback, future versions, checkpoint/task/capsule foreign keys, and
+corrupt checkpoint or capsule data.

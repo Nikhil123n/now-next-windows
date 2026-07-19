@@ -25,6 +25,10 @@ public sealed partial class TodayPlanStore : IDisposable
             2,
             "current_focus_session_checkpoint",
             "NowNext.App.Persistence.Migrations.0002_current_focus_session_checkpoint.sql"),
+        new(
+            3,
+            "context_capsules_and_break_recovery",
+            "NowNext.App.Persistence.Migrations.0003_context_capsules_and_break_recovery.sql"),
     ];
 
     private readonly string _databasePath;

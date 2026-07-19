@@ -3,7 +3,7 @@
 NOW/NEXT is a private, local-only Windows 11 day-planning and focus application for one
 user on one Surface. This repository is the new source of truth and currently contains
 the Today domain and local SQLite foundation, the authoritative focus-session and
-recovery engine, and a plain runnable Today-to-Focus vertical slice.
+recovery engine, and a plain runnable Today-to-Focus-to-Break vertical slice.
 
 Start with [AGENTS.md](AGENTS.md), then read [PRODUCT.md](PRODUCT.md),
 [SCOPE.md](SCOPE.md), [ARCHITECTURE.md](ARCHITECTURE.md), the authoritative
@@ -33,17 +33,19 @@ dotnet run --project .\src\NowNext.App\NowNext.App.csproj --configuration Releas
 - Repository policy and Windows CI: configured.
 - Today domain: immutable task values and validated single-day ordering.
 - Local persistence: versioned App-owned SQLite for today's create, edit, soft delete,
-  reorder, and load operations, plus one durable current-session checkpoint.
+  reorder, and load operations, plus a durable current-session checkpoint, Context
+  Capsules, and Break defaults.
 - Focus sessions: pure Core transitions for both timer modes, limits, overtime, Landing,
-  extension, completion, parking, Break, recovery, and day closure. Elapsed work comes
-  from monotonic time rather than UI refreshes.
+  extension, completion, parking, explicit abandonment, bounded Break, recovery, and day
+  closure. Elapsed work comes from monotonic time rather than UI refreshes.
 - Packaged application: a plain Today screen supports approved-field editing, deletion,
   ordering, and Start. The full-screen Focus view uses the authoritative engine for both
   timer modes, transient controls, overtime, Landing, extension, parking, completion,
-  and explicit restart/suspension recovery.
+  explicit restart/suspension recovery, atomic Context Capsule saving, one-prompt Breaks,
+  and confirmed return without automatic task switching.
 - UI automation: deterministic presentation contracts are tested in MSTest; the
   interaction and Windows accessibility cases are recorded in the
-  [Prompt 5 manual test script](docs/testing/prompt-5-manual-test-script.md).
+  [Prompt 6 manual test script](docs/testing/prompt-6-manual-test-script.md).
 - License: proprietary; see [LICENSE](LICENSE).
 
 See [the documentation index](docs/README.md) and [contribution guide](CONTRIBUTING.md)

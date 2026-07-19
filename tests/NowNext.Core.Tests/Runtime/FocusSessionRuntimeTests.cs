@@ -222,4 +222,39 @@ public sealed class FocusSessionRuntimeTests
         Assert.AreEqual(TimeSpan.FromMinutes(4), interrupted.CommittedActiveDuration);
     }
 
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task ParkPublishesOnlyAfterContextCapsuleIsCommitted()
+    {
+        using var database = new TestDatabase();
+        var clock = new ManualTimeProvider(InitialUtc);
+        DomainTask task = TestTaskFactory.Create();
+        using var store = new TodayPlanStore(database.DatabasePath, clock);
+        await store.CreateTaskAsync(task, _testContext.CancellationToken);
+        using var runtime = new FocusSessionRuntime(store, clock);
+        await runtime.InitializeAsync(_testContext.CancellationToken);
+        await runtime.CreateAsync(
+            new SessionId(Guid.NewGuid()),
+            task.Id,
+            task.TimingMode,
+            task.PlannedDuration,
+            _testContext.CancellationToken);
+        await runtime.ExecuteAsync(new StartSession(), _testContext.CancellationToken);
+
+        await runtime.ExecuteAsync(
+            new ParkSession(
+                "Open the next reviewer comment",
+                "The first comment is already resolved."),
+            _testContext.CancellationToken);
+        ContextCapsule? capsule = await store.LoadLatestContextCapsuleAsync(
+            task.Id,
+            _testContext.CancellationToken);
+
+        Assert.IsInstanceOfType<ParkedSessionState>(runtime.Current!.State);
+        Assert.IsNotNull(capsule);
+        Assert.AreEqual(runtime.Current.Id, capsule.SessionId);
+        Assert.AreEqual("Open the next reviewer comment", capsule.NextPhysicalAction);
+        Assert.AreEqual("The first comment is already resolved.", capsule.Note);
+    }
+
 }

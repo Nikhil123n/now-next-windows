@@ -25,9 +25,10 @@ Motion calls for a static colon.
 - Schedule repairs are deterministic, explained, previewed, and approved before apply.
 - The focus view normally contains only the focus label and timer.
 - The current vertical slice includes plain Today planning and the minimal Focus view on
-  top of the authoritative Core session engine and durable recovery checkpoints.
-- Do not infer permission for visual polish, background services, Break UI, schedule
-  repair, session history, Context Capsules, or another focus mode from this slice.
+  top of the authoritative Core session engine, durable Context Capsules, bounded Breaks,
+  and recovery checkpoints.
+- Do not infer permission for visual polish, background services, schedule repair,
+  general session history, wellness engines, or another focus mode from this slice.
 
 ## Approved implementation shape
 

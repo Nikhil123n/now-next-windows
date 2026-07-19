@@ -206,11 +206,12 @@ public sealed class FocusSessionMachineTests
         session = Apply(session, new EndBreak(), clock).Session;
 
         Assert.AreEqual(TimeSpan.FromMinutes(7), session.CommittedActiveDuration);
-        Assert.AreEqual(TimeSpan.FromMinutes(6), session.BreakDuration);
+        Assert.AreEqual(TimeSpan.FromMinutes(5), session.BreakDuration);
         CompletedSessionState outcome =
             Assert.IsInstanceOfType<CompletedSessionState>(session.State);
         Assert.AreEqual(completed.CompletedAtUtc, outcome.CompletedAtUtc);
-        Assert.AreEqual(TimeSpan.FromMinutes(6), breakReading.Elapsed);
+        Assert.AreEqual(TimeSpan.FromMinutes(5), breakReading.Elapsed);
+        Assert.AreEqual(TimeSpan.FromMinutes(5), breakReading.Limit);
     }
 
     [TestMethod]
@@ -290,6 +291,56 @@ public sealed class FocusSessionMachineTests
         Assert.ThrowsExactly<ArgumentException>(
             () => new ResumeIncludingAwayTime(TimeSpan.FromTicks(-1)));
         Assert.ThrowsExactly<ArgumentException>(() => new ParkSession("  "));
+        Assert.ThrowsExactly<ArgumentException>(
+            () => new BeginBreak(new BreakPlan(
+                TimeSpan.Zero,
+                new BreakPrompt(BreakPromptKind.Water))));
+        Assert.ThrowsExactly<ArgumentException>(
+            () => new BreakPrompt(BreakPromptKind.UserSelectedMovement, "  "));
+    }
+
+    [TestMethod]
+    public void BreakBoundaryIsBoundedIdempotentAndWaitsForExplicitReturn()
+    {
+        var clock = new SessionTestClock();
+        FocusSession session = Apply(CreateSession(), new StartSession(), clock).Session;
+        session = Apply(session, new ParkSession("Open section four"), clock).Session;
+        session = Apply(
+            session,
+            new BeginBreak(new BreakPlan(
+                TimeSpan.FromMinutes(3),
+                new BreakPrompt(BreakPromptKind.ShoulderRelease))),
+            clock).Session;
+        clock.Advance(TimeSpan.FromMinutes(10));
+
+        SessionTransition boundary = Apply(session, new RefreshSession(), clock);
+        SessionTransition repeated = Apply(boundary.Session, new RefreshSession(), clock);
+
+        Assert.AreEqual(SessionSignal.BreakLimitReached, boundary.Signal);
+        Assert.AreEqual(SessionSignal.None, repeated.Signal);
+        Assert.AreEqual(TimeSpan.FromMinutes(3), repeated.Session.BreakDuration);
+        Assert.IsInstanceOfType<BreakCompletedSessionState>(repeated.Session.State);
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => Apply(repeated.Session, new StartSession(), clock));
+
+        FocusSession returned = Apply(repeated.Session, new EndBreak(), clock).Session;
+        ParkedSessionState parked = Assert.IsInstanceOfType<ParkedSessionState>(returned.State);
+        Assert.AreEqual("Open section four", parked.NextPhysicalAction);
+    }
+
+    [TestMethod]
+    public void ExplicitAbandonEndsFocusWithoutPretendingToPark()
+    {
+        var clock = new SessionTestClock();
+        FocusSession session = Apply(CreateSession(), new StartSession(), clock).Session;
+        clock.Advance(TimeSpan.FromMinutes(2));
+
+        session = Apply(session, new AbandonSession(), clock).Session;
+
+        Assert.IsInstanceOfType<AbandonedSessionState>(session.State);
+        Assert.AreEqual(TimeSpan.FromMinutes(2), session.CommittedActiveDuration);
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => Apply(session, new BeginBreak(), clock));
     }
 
     [TestMethod]

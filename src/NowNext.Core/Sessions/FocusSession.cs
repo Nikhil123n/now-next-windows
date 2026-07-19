@@ -65,6 +65,29 @@ public sealed record FocusSession
                 nameof(landingDuration));
         }
 
+        BreakPlan? activeBreakPlan = state switch
+        {
+            BreakSessionState runningBreak => runningBreak.Plan,
+            BreakCompletedSessionState completedBreak => completedBreak.Plan,
+            RecoveryRequiredSessionState { InterruptedPhase: ActiveSessionPhase.Break }
+                recovery => recovery.BreakPlan,
+            _ => null,
+        };
+        if (activeBreakPlan is not null && breakDuration > activeBreakPlan.Duration)
+        {
+            throw new ArgumentException(
+                "Break duration must not exceed its approved limit.",
+                nameof(breakDuration));
+        }
+
+        if (state is BreakCompletedSessionState
+            && breakDuration != activeBreakPlan!.Duration)
+        {
+            throw new ArgumentException(
+                "A completed Break must equal its approved limit.",
+                nameof(breakDuration));
+        }
+
         Id = id;
         TaskId = taskId;
         TimingMode = timingMode;
