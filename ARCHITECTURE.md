@@ -42,7 +42,7 @@ or ML capabilities.
 
 `NowNext.Core` remains package-free. `NowNext.Core.Tests` uses the globally pinned
 MSTest SDK. `CommunityToolkit.Mvvm` `8.4.2` remains a centrally pinned future baseline
-and is not referenced. Prompt 8 adds no production dependency.
+and is not referenced. Prompts 8 and 9 add no production dependency.
 
 ## Project boundaries
 
@@ -181,6 +181,24 @@ Interfaces exist only for Windows calls that deterministic tests replace: applic
 paths/settings, display keep-awake, startup task, Reduced Motion, and power events. They
 are Windows integration seams, not cross-platform adapters or a generalized service
 layer.
+
+## Prototype qualification and packaging
+
+Release-candidate qualification remains repository tooling. The build command first runs
+the canonical verification path, publishes the existing x64 packaged App, creates or
+reuses a non-exportable CurrentUser code-signing key with subject
+`CN=NowNext Development`, exports only its public certificate beside the MSIX, and
+records SHA-256 hashes. The elevated installer verifies the package signer against that
+certificate and imports only the public certificate into
+`LocalMachine\\TrustedPeople`; it never changes a Trusted Root store. This is narrow
+one-device development signing and does not implement the deferred production-signing,
+Store, updater, channel, or enterprise-deployment capabilities.
+
+Performance qualification records observed cold-start duration, normalized idle CPU,
+working/private memory, responsiveness, and long-run samples without introducing an
+application telemetry path or invented pass threshold. Results live under ignored local
+artifacts. Forced-termination qualification targets only the installed package process
+and verifies recovery through its already durable checkpoint.
 
 ## Accessibility and diagnostics
 

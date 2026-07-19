@@ -23,6 +23,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify.ps1
 This validates repository policy, restores locked packages, verifies formatting, builds
 Release with warnings as errors, and runs the MSTest suite.
 
+Build the owner-only locally installable prototype after verification with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-PrototypePackage.ps1
+```
+
+Installation prerequisites, the elevated local-certificate step, data safety, recovery,
+and uninstall behavior are in the
+[release-candidate guide](docs/release-candidate/README.md).
+
 Launch the packaged application after a Release build with:
 
 ```powershell
@@ -54,6 +64,11 @@ dotnet run --project .\src\NowNext.App\NowNext.App.csproj --configuration Releas
 - UI automation: deterministic presentation contracts are tested in MSTest; the
   interaction and Windows accessibility cases are recorded in the
   [Prompt 8 Surface hardware test](docs/testing/prompt-8-surface-hardware-test.md).
+- Release-candidate qualification: complete persisted-journey, restart-state, every-
+  migration-baseline, forced-termination, long fake-clock, repeated-transition,
+  accessibility, Reduced Motion, and backup/restore contracts are automated; the
+  remaining packaged Surface interactions are recorded in the
+  [Prompt 9 qualification script](docs/testing/prompt-9-release-candidate-test.md).
 - License: proprietary; see [LICENSE](LICENSE).
 
 See [the documentation index](docs/README.md) and [contribution guide](CONTRIBUTING.md)

@@ -85,6 +85,8 @@ $requiredFiles = @(
     'docs\plans\prompt-6-context-break-journey.md',
     'docs\plans\prompt-7-schedule-recovery-shutdown.md',
     'docs\plans\prompt-8-windows-integration-and-data-safety.md',
+    'docs\plans\prompt-9-release-candidate-qualification.md',
+    'docs\release-candidate\README.md',
     'docs\sqlite-schema.md',
     'docs\timer-invariants.md',
     'docs\testing\README.md',
@@ -92,7 +94,12 @@ $requiredFiles = @(
     'docs\testing\prompt-6-manual-test-script.md',
     'docs\testing\prompt-7-manual-test-script.md',
     'docs\testing\prompt-8-surface-hardware-test.md',
+    'docs\testing\prompt-9-release-candidate-test.md',
+    'scripts\Build-PrototypePackage.ps1',
     'scripts\Database-Dev.ps1',
+    'scripts\Install-PrototypePackage.ps1',
+    'scripts\Measure-Prototype.ps1',
+    'scripts\Restart-PrototypeForRecoveryTest.ps1',
     'scripts\Verify.ps1',
     'scripts\Validate-AgentSkills.ps1',
     'scripts\Validate-Repository.ps1',
@@ -127,6 +134,7 @@ $requiredFiles = @(
     'src\NowNext.App\packages.lock.json',
     'src\NowNext.App\Presentation\FocusControlPolicy.cs',
     'src\NowNext.App\Presentation\TaskEditorInput.cs',
+    'src\NowNext.App\Presentation\TimerColonPolicy.cs',
     'src\NowNext.App\Presentation\TimerDisplayFormatter.cs',
     'src\NowNext.App\Presentation\TodayTaskItem.cs',
     'src\NowNext.App\WindowsIntegration\ApplicationDataPaths.cs',
@@ -169,6 +177,7 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\Planning\ScheduleRepairEngineTests.cs',
     'tests\NowNext.Core.Tests\Planning\WorkdayProjectionTests.cs',
     'tests\NowNext.Core.Tests\Presentation\FocusControlPolicyTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\ReleaseCandidateAccessibilityTests.cs',
     'tests\NowNext.Core.Tests\Presentation\BreakViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\FocusViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\TaskEditorInputTests.cs',
@@ -176,6 +185,10 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\Presentation\WorkdayViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\WindowsIntegrationViewContractTests.cs',
     'tests\NowNext.Core.Tests\Runtime\FocusSessionRuntimeTests.cs',
+    'tests\NowNext.Core.Tests\Qualification\ProcessTerminationTests.cs',
+    'tests\NowNext.Core.Tests\Qualification\ReleaseCandidateJourneyTests.cs',
+    'tests\NowNext.Core.Tests\Qualification\ReleaseCandidateRestartTests.cs',
+    'tests\NowNext.Core.Tests\Qualification\ReleaseCandidateTimerTests.cs',
     'tests\NowNext.Core.Tests\Sessions\FocusSessionMachineTests.cs',
     'tests\NowNext.Core.Tests\Sessions\ContextCapsuleTests.cs',
     'tests\NowNext.Core.Tests\Sessions\SessionRecoveryTests.cs',
@@ -202,6 +215,7 @@ $requiredDirectories = @(
     '.github\workflows',
     'docs\decisions',
     'docs\plans',
+    'docs\release-candidate',
     'docs\testing',
     'src\NowNext.App\Diagnostics',
     'src\NowNext.App\Persistence\Migrations',
@@ -214,6 +228,7 @@ $requiredDirectories = @(
     'tests\NowNext.Core.Tests\Persistence',
     'tests\NowNext.Core.Tests\Planning',
     'tests\NowNext.Core.Tests\Presentation',
+    'tests\NowNext.Core.Tests\Qualification',
     'tests\NowNext.Core.Tests\Runtime',
     'tests\NowNext.Core.Tests\Sessions',
     'tests\NowNext.Core.Tests\WindowsIntegration',
@@ -489,6 +504,34 @@ if (Test-Path -LiteralPath $packageManifestPath -PathType Leaf) {
         $startupTasks[0].Enabled -ne 'false') {
         Add-ValidationError 'Package manifest must declare exactly one NOW/NEXT startup task disabled by default.'
     }
+
+    $identity = @($packageManifest.Package.Identity)
+    if ($identity.Count -ne 1 -or $identity[0].Publisher -ne 'CN=NowNext Development') {
+        Add-ValidationError 'Prototype package identity must match the narrow local development signer.'
+    }
+
+    $startupExtensions = @($packageManifest.SelectNodes('//desktop:Extension', $namespaceManager))
+    if ($startupExtensions.Count -ne 1 -or
+        $startupExtensions[0].Executable -ne 'NowNext.App.exe') {
+        Add-ValidationError 'Startup extension must name the packaged executable explicitly.'
+    }
+}
+
+$buildPackageScript = Join-Path $repositoryRoot 'scripts\Build-PrototypePackage.ps1'
+$installPackageScript = Join-Path $repositoryRoot 'scripts\Install-PrototypePackage.ps1'
+if ((Test-Path -LiteralPath $buildPackageScript -PathType Leaf) -and
+    (Test-Path -LiteralPath $installPackageScript -PathType Leaf)) {
+    $buildPackageSource = Get-Content -LiteralPath $buildPackageScript -Encoding UTF8 -Raw
+    $installPackageSource = Get-Content -LiteralPath $installPackageScript -Encoding UTF8 -Raw
+    if (-not $buildPackageSource.Contains('-p:AppxPackageSigningEnabled=true') -or
+        -not $buildPackageSource.Contains('Export-Certificate')) {
+        Add-ValidationError 'Prototype packaging must sign and export only the public local certificate.'
+    }
+    if (-not $installPackageSource.Contains('Cert:\LocalMachine\TrustedPeople') -or
+        $installPackageSource.Contains('-AllowUnsigned') -or
+        $installPackageSource.Contains('TrustedRoot')) {
+        Add-ValidationError 'Prototype installation must use only LocalMachine TrustedPeople and a signed package.'
+    }
 }
 
 $diagnosticLogPath = Join-Path $repositoryRoot 'src\NowNext.App\Diagnostics\LocalDiagnosticLog.cs'
@@ -505,7 +548,8 @@ $documentationRequirements = @{
     'AGENTS.md' = 'deterministic same-day repair'
     'ARCHITECTURE.md' = 'focus-session ledger'
     'SCOPE.md' = '## Current vertical-slice boundary'
-    'docs\testing\README.md' = 'Prompt 8 Surface hardware test'
+    'docs\testing\README.md' = 'Prompt 9 release-candidate test'
+    'docs\release-candidate\README.md' = 'CN=NowNext Development'
     'docs\sqlite-schema.md' = 'Version 4 schedule repair'
     'docs\timer-invariants.md' = 'at least 15'
 }

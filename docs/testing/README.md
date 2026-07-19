@@ -56,6 +56,12 @@ The known WinUI generated-file workspace diagnostic is informational only when
   loadable copies, corruption rejection without live-data loss, pre-cancellation, and
   package-local cleanup. Static WinUI/manifest checks require accessible touch targets,
   explicit restore/reset confirmation, and a startup task disabled by default.
+- Release-candidate suites run the persisted Today-to-Shutdown journey through both timer
+  modes; restore every active session phase; exercise practical child-process termination;
+  advance fake monotonic time through long sessions and repeated idempotent boundaries;
+  upgrade from schema baselines 0, 1, 2, 3, and 4; verify keyboard command and Reduced
+  Motion policies; and restore task, capsule, setting, and committed checkpoint data from
+  validated backups.
 
 SQLite tests use unique temporary database paths and never access the packaged user's
 LocalState. WinUI controls are not instantiated in the MTP test process because the
@@ -77,6 +83,12 @@ high contrast, text scaling, and Reduced Motion. The
 [Prompt 5 script](prompt-5-manual-test-script.md) remains the baseline Today/Focus check.
 Hardware suspend/Modern Standby remains a manual integration check and does not justify a
 background service.
+
+Run the [Prompt 9 release-candidate test](prompt-9-release-candidate-test.md) from a clean
+package installation for the unified P0 journey, restart/termination matrix, offline
+launch, keyboard/touch/Reduced Motion checks, backup/restore/uninstall, and raw cold-start,
+idle, and long-run measurements. Record unrun hardware cases as limitations rather than
+passes.
 
 Later milestones may expose deliberately approved general history without changing these
 repair/recovery or Windows power invariants. Prototype success still

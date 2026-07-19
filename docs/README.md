@@ -36,6 +36,8 @@ approved subject to Windows Reduced Motion accessibility behavior.
   — deterministic repair, durable workday decisions, and verification record.
 - [Prompt 8 Windows integration plan](plans/prompt-8-windows-integration-and-data-safety.md)
   — bounded Windows lifecycle behavior, local data safety, and verification record.
+- [Prompt 9 release-candidate plan](plans/prompt-9-release-candidate-qualification.md)
+  — complete-journey qualification, packaging, measurements, and result record.
 - [Timer invariants](timer-invariants.md) — authoritative elapsed-time, transition,
   boundary, and recovery rules.
 - [SQLite schema](sqlite-schema.md) — current migration and retention contract.
@@ -48,6 +50,10 @@ approved subject to Windows Reduced Motion accessibility behavior.
   repair, late Recovery, Shutdown, resting-state, and accessibility checks.
 - [Prompt 8 Surface hardware test](testing/prompt-8-surface-hardware-test.md) — touch,
   display wake, sleep/resume, lid, autostart, battery, long-session, and data-safety checks.
+- [Prompt 9 release-candidate test](testing/prompt-9-release-candidate-test.md) — clean
+  install, full P0 journey, restart matrix, accessibility, data safety, and measurements.
+- [Release-candidate guide](release-candidate/README.md) — prerequisites, local package
+  installation, data location, backup/recovery, known limitations, and uninstall.
 
 ## Current phase
 
@@ -59,3 +65,6 @@ multi-day planning, optimizer menus, background services, cloud backup, remote
 diagnostics, visual polish, and deferred features remain unimplemented. The App now adds
 bounded Windows lifecycle notifications, active-session display keep-awake, startup and
 full-screen preferences, privacy-safe diagnostics, and validated local data maintenance.
+The repository now qualifies that existing behavior with deterministic end-to-end state
+coverage, a locally installable owner-only package, raw device measurements, and an
+explicit manual Surface result record; qualification adds no product feature.

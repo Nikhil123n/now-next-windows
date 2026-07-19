@@ -17,6 +17,38 @@ public sealed class MigrationTests
     }
 
     [TestMethod]
+    [DataRow(0)]
+    [DataRow(1)]
+    [DataRow(2)]
+    [DataRow(3)]
+    [DataRow(4)]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task InitializeEveryExistingSchemaVersionReachesCurrent(
+        int startingVersion)
+    {
+        using var database = new TestDatabase();
+        await CreateSchemaVersionAsync(
+            database,
+            startingVersion,
+            _testContext.CancellationToken);
+        using var store = CreateStore(database);
+
+        await store.InitializeAsync(_testContext.CancellationToken);
+        (long version, string name, long count) = await ReadMigrationAsync(
+            database,
+            _testContext.CancellationToken);
+        string integrity = await ReadTextScalarAsync(
+            database,
+            "PRAGMA quick_check;",
+            _testContext.CancellationToken);
+
+        Assert.AreEqual(4L, version);
+        Assert.AreEqual("schedule_recovery_shutdown", name);
+        Assert.AreEqual(4L, count);
+        Assert.AreEqual("ok", integrity);
+    }
+
+    [TestMethod]
     [Timeout(10_000, CooperativeCancellation = true)]
     public async System.Threading.Tasks.Task InitializeEmptyDatabaseRecordsAllMigrationsOnce()
     {
@@ -462,6 +494,39 @@ public sealed class MigrationTests
             cancellationToken);
     }
 
+    private static async System.Threading.Tasks.Task CreateSchemaVersionAsync(
+        TestDatabase database,
+        int version,
+        CancellationToken cancellationToken)
+    {
+        switch (version)
+        {
+            case 0:
+                return;
+            case 1:
+                await CreateVersionOneDatabaseAsync(database, cancellationToken);
+                return;
+            case 2:
+                await CreateVersionTwoDatabaseAsync(database, cancellationToken);
+                return;
+            case 3:
+                await CreateVersionThreeDatabaseAsync(database, cancellationToken);
+                return;
+            case 4:
+                using (TodayPlanStore current = CreateStore(database))
+                {
+                    await current.InitializeAsync(cancellationToken);
+                }
+
+                return;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(version),
+                    version,
+                    "The schema version must be between 0 and 4.");
+        }
+    }
+
     private static async System.Threading.Tasks.Task<(long Version, string Name, long Count)>
         ReadMigrationAsync(TestDatabase database, CancellationToken cancellationToken)
     {
@@ -513,5 +578,19 @@ public sealed class MigrationTests
         command.CommandText = sql;
         object? result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async System.Threading.Tasks.Task<string> ReadTextScalarAsync(
+        TestDatabase database,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToString(result, System.Globalization.CultureInfo.InvariantCulture)
+            ?? string.Empty;
     }
 }

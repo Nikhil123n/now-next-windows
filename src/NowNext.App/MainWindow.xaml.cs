@@ -1138,14 +1138,9 @@ public sealed partial class MainWindow : Window
 
     private void OnColonTimerTick(DispatcherQueueTimer sender, object args)
     {
-        if (_reducedMotionPreference?.IsReducedMotionEnabled == true)
-        {
-            _colonVisible = true;
-        }
-        else
-        {
-            _colonVisible = !_colonVisible;
-        }
+        _colonVisible = TimerColonPolicy.GetNextVisibility(
+            _colonVisible,
+            _reducedMotionPreference?.IsReducedMotionEnabled == true);
 
         double opacity = _colonVisible ? 1 : 0;
         TimerFirstColonText.Opacity = opacity;

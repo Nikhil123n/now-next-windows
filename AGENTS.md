@@ -32,6 +32,9 @@ Motion calls for a static colon.
   day close, and exit without blocking explicit sleep, lid, power, or shutdown actions.
 - Backup/export/restore/reset must use validated SQLite operations and exact LocalState
   path checks. Default diagnostics accept no user-authored task or Context Capsule text.
+- The current release-candidate phase adds qualification tests, measurement commands,
+  and local development packaging only. It adds no product behavior, production signing,
+  updater, Store path, telemetry, or visual polish.
 - Do not infer permission for visual polish, background services, optimizer menus,
   general history UI, wellness engines, multi-day planning, or another focus mode from
   this slice.
