@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
-using Microsoft.Windows.System.Power;
+using NowNext.App.Diagnostics;
 using NowNext.App.Persistence;
+using NowNext.App.WindowsIntegration;
 
 namespace NowNext.App;
 
@@ -10,6 +11,9 @@ public partial class App : Application, IDisposable
     private TodayPlanStore? _store;
     private FocusSessionRuntime? _sessionRuntime;
     private IKeepAwakeController? _keepAwakeController;
+    private WindowsLifecycleCoordinator? _lifecycleCoordinator;
+    private DataMaintenanceService? _dataMaintenanceService;
+    private LocalDiagnosticLog? _diagnosticLog;
     private bool _disposed;
 
     public App()
@@ -23,17 +27,56 @@ public partial class App : Application, IDisposable
 
         try
         {
-            _store = TodayPlanStore.CreateForCurrentUser();
+            var paths = new WindowsApplicationDataPaths();
+            var userSettings = new WindowsUserSettings();
+            var reducedMotionPreference = new WindowsReducedMotionPreference();
+            var launchAtSignInService = new WindowsLaunchAtSignInService();
+            _diagnosticLog = new LocalDiagnosticLog(paths);
+            _store = new TodayPlanStore(paths.DatabasePath);
             await _store.InitializeAsync();
-            _sessionRuntime = new FocusSessionRuntime(_store);
+            await TryWriteDiagnosticAsync(
+                DiagnosticEventId.StorageInitialized,
+                DiagnosticResult.Succeeded);
+            _keepAwakeController = new WindowsDisplayKeepAwakeController();
+            _sessionRuntime = new FocusSessionRuntime(
+                _store,
+                keepAwakeController: _keepAwakeController,
+                isKeepAwakeEnabled: () => userSettings.KeepDisplayAwakeDuringSessions);
             await _sessionRuntime.InitializeAsync();
-            _keepAwakeController = new NoOpKeepAwakeController();
-            PowerManager.SystemSuspendStatusChanged += OnSystemSuspendStatusChanged;
-            _window = new MainWindow(_store, _sessionRuntime, _keepAwakeController);
+            _lifecycleCoordinator = new WindowsLifecycleCoordinator(
+                _sessionRuntime,
+                _keepAwakeController,
+                new WindowsPowerEventSource(),
+                _diagnosticLog);
+            _dataMaintenanceService = new DataMaintenanceService(paths, _diagnosticLog);
+            var mainWindow = new MainWindow(
+                _store,
+                _sessionRuntime,
+                _keepAwakeController,
+                _lifecycleCoordinator,
+                _dataMaintenanceService,
+                userSettings,
+                launchAtSignInService,
+                reducedMotionPreference);
+            _lifecycleCoordinator.RecoveryReloaded += (_, _) =>
+                _ = mainWindow.DispatcherQueue.TryEnqueue(
+                    async () => await mainWindow.HandleRecoveryReloadedAsync());
+            _lifecycleCoordinator.PersistenceFailed += (_, _) =>
+                _ = mainWindow.DispatcherQueue.TryEnqueue(
+                    () => mainWindow.SetStatus(
+                        "NOW/NEXT could not save local recovery state."));
+            _window = mainWindow;
+            await TryWriteDiagnosticAsync(
+                DiagnosticEventId.AppStarted,
+                DiagnosticResult.Succeeded);
         }
         catch (Exception exception) when (
             exception is TodayPlanStorageException or InvalidDataException)
         {
+            await TryWriteDiagnosticAsync(
+                DiagnosticEventId.StorageInitialized,
+                DiagnosticResult.Failed,
+                exception);
             _window = new MainWindow(storageFailureMessage);
         }
 
@@ -41,35 +84,27 @@ public partial class App : Application, IDisposable
         _window.Activate();
     }
 
-    private async void OnSystemSuspendStatusChanged(object? sender, object args)
+    private async System.Threading.Tasks.Task TryWriteDiagnosticAsync(
+        DiagnosticEventId eventId,
+        DiagnosticResult result,
+        Exception? exception = null)
     {
-        if (_sessionRuntime is null)
+        if (_diagnosticLog is null)
         {
             return;
         }
 
         try
         {
-            switch (PowerManager.SystemSuspendStatus)
-            {
-                case SystemSuspendStatus.Entering:
-                    await _sessionRuntime.InterruptForSuspensionAsync();
-                    break;
-                case SystemSuspendStatus.AutoResume:
-                case SystemSuspendStatus.ManualResume:
-                    await _sessionRuntime.ReloadAfterResumeAsync();
-                    break;
-            }
+            await _diagnosticLog.WriteAsync(eventId, result, exception);
         }
-        catch (Exception exception) when (
-            exception is TodayPlanStorageException or InvalidDataException)
+        catch (Exception diagnosticException) when (
+            diagnosticException is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ObjectDisposedException)
         {
-            if (_window is MainWindow mainWindow)
-            {
-                _ = mainWindow.DispatcherQueue.TryEnqueue(
-                    () => mainWindow.SetStatus(
-                        "NOW/NEXT could not save local recovery state."));
-            }
+            // Startup must remain usable when the optional diagnostic file is unavailable.
         }
     }
 
@@ -85,9 +120,14 @@ public partial class App : Application, IDisposable
             return;
         }
 
-        PowerManager.SystemSuspendStatusChanged -= OnSystemSuspendStatusChanged;
+        _lifecycleCoordinator?.Dispose();
         _sessionRuntime?.Dispose();
+        _dataMaintenanceService?.Dispose();
         _store?.Dispose();
+        _diagnosticLog?.Dispose();
+        _lifecycleCoordinator = null;
+        _dataMaintenanceService = null;
+        _diagnosticLog = null;
         _sessionRuntime = null;
         _keepAwakeController = null;
         _store = null;

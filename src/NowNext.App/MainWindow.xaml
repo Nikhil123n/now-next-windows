@@ -15,6 +15,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -92,8 +93,92 @@
             </StackPanel>
 
             <Border
-                x:Name="RepairCallout"
+                x:Name="WindowsDataSettingsPanel"
                 Grid.Row="2"
+                Margin="0,12,0,0"
+                Padding="12"
+                AutomationProperties.Name="Windows and local data settings"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="8">
+                <Grid ColumnSpacing="24">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="4">
+                        <TextBlock
+                            FontWeight="SemiBold"
+                            Text="Windows" />
+                        <CheckBox
+                            x:Name="LaunchAtSignInCheckBox"
+                            AutomationProperties.Name="Launch NOW/NEXT when signing in to Windows"
+                            Click="OnLaunchAtSignInClick"
+                            Content="Launch at sign-in"
+                            MinHeight="44" />
+                        <CheckBox
+                            x:Name="KeepDisplayAwakeCheckBox"
+                            AutomationProperties.Name="Keep the display awake during active sessions"
+                            Click="OnKeepDisplayAwakeClick"
+                            Content="Keep display awake during active Focus, Landing, and Break"
+                            MinHeight="44" />
+                        <CheckBox
+                            x:Name="StartFullScreenCheckBox"
+                            AutomationProperties.Name="Start NOW/NEXT full screen on its next launch"
+                            Click="OnStartFullScreenClick"
+                            Content="Start full screen next launch"
+                            MinHeight="44" />
+                        <TextBlock
+                            x:Name="ReducedMotionStatusText"
+                            AutomationProperties.LiveSetting="Polite"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="8">
+                        <TextBlock
+                            FontWeight="SemiBold"
+                            Text="Local data" />
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Button
+                                AutomationProperties.Name="Create a validated local backup"
+                                Click="OnBackupClick"
+                                Content="Backup"
+                                MinHeight="44"
+                                MinWidth="96" />
+                            <Button
+                                AutomationProperties.Name="Export a validated copy of local data"
+                                Click="OnExportClick"
+                                Content="Export"
+                                MinHeight="44"
+                                MinWidth="96" />
+                            <Button
+                                AutomationProperties.Name="Restore local data from a validated database"
+                                Click="OnRestoreClick"
+                                Content="Restore"
+                                MinHeight="44"
+                                MinWidth="96" />
+                            <Button
+                                AutomationProperties.Name="Completely reset local NOW/NEXT data"
+                                Click="OnResetDataClick"
+                                Content="Reset data"
+                                MinHeight="44"
+                                MinWidth="104" />
+                        </StackPanel>
+                        <TextBlock
+                            x:Name="DataMaintenanceStatusText"
+                            AutomationProperties.LiveSetting="Polite"
+                            MaxWidth="440"
+                            Text="Backups stay on this device unless you explicitly export one."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border
+                x:Name="RepairCallout"
+                Grid.Row="3"
                 Margin="0,12,0,0"
                 Padding="12"
                 AutomationProperties.Name="Schedule repair needs review"
@@ -112,7 +197,7 @@
 
             <ListView
                 x:Name="TodayTaskList"
-                Grid.Row="3"
+                Grid.Row="4"
                 Margin="0,24,0,16"
                 AutomationProperties.Name="Today's chronological tasks"
                 ItemsSource="{x:Bind TodayItems, Mode=OneWay}"
@@ -193,7 +278,7 @@
 
             <StackPanel
                 x:Name="EmptyTodayPanel"
-                Grid.Row="3"
+                Grid.Row="4"
                 HorizontalAlignment="Center"
                 IsHitTestVisible="False"
                 Spacing="8"
@@ -210,9 +295,10 @@
 
             <TextBlock
                 x:Name="StatusText"
-                Grid.Row="4"
+                Grid.Row="5"
                 AutomationProperties.LiveSetting="Polite"
                 MinHeight="24"
+                Text="NOW/NEXT prototype is ready."
                 TextWrapping="Wrap" />
         </Grid>
 

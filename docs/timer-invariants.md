@@ -154,3 +154,10 @@ timestamps. It never persists a monotonic anchor for another process.
 - Any final DayClosed checkpoint, ledger update, and closure summary commit before the
   runtime publishes closure. Keep-awake release occurs afterward; its failure does not
   delete or reopen the persisted day.
+- Observed Windows suspend and normal app-close signals use the same serialized
+  interruption checkpoint. Resume reloads that checkpoint as RecoveryRequired and never
+  invokes a resume command. Explicit sleep, lid-close, power, and shutdown actions are
+  not delayed to keep focus running.
+- A user-enabled display request follows only actively accruing Focus, overtime, Landing,
+  or Break states. Pause, boundary decisions, Recovery, terminal states, suspension, day
+  close, and process exit release it; display state never changes elapsed-time authority.

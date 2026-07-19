@@ -395,6 +395,12 @@ public sealed class FocusSessionRuntimeTests
 
         internal bool SawDurableClosure { get; private set; }
 
+        public bool IsActive => false;
+
+        public void Acquire()
+        {
+        }
+
         public void Release()
         {
             Released = true;

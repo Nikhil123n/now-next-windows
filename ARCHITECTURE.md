@@ -42,7 +42,7 @@ or ML capabilities.
 
 `NowNext.Core` remains package-free. `NowNext.Core.Tests` uses the globally pinned
 MSTest SDK. `CommunityToolkit.Mvvm` `8.4.2` remains a centrally pinned future baseline
-and is not referenced. Prompt 7 adds no production dependency.
+and is not referenced. Prompt 8 adds no production dependency.
 
 ## Project boundaries
 
@@ -52,9 +52,10 @@ and is not referenced. Prompt 7 adds no production dependency.
   Shutdown projections, and durable-checkpoint validation while remaining free of
   WinUI, Windows storage, and package dependencies.
 - `NowNext.App` contains the plain Today and Focus WinUI surfaces, small stateless
-  presentation formatters/policies, the narrow Windows lifecycle/runtime bridge, and the
-  concrete SQLite store. It initializes the per-user database before loading Today and
-  commits a transition before publishing it as successful.
+  presentation formatters/policies, narrow Windows path/settings/power/accessibility
+  services, the lifecycle/runtime bridge, privacy-safe local diagnostics, and the
+  concrete SQLite store and data-maintenance operations. It initializes the per-user
+  database before loading Today and commits a transition before publishing success.
 - `NowNext.Core.Tests` targets Windows and references both production projects. Domain
   and persistence tests remain separated by namespace and directory.
 
@@ -134,8 +135,17 @@ ledger rows are retained after schedule deletion, but there is no general histor
 Shutdown requires an explicitly configured time. Its summary totals retained active
 focus (including Landing and excluding Break), persists closure and any final session
 checkpoint before publishing success, and then calls the narrow
-`IKeepAwakeController.Release()` hook. The prototype hook is an idempotent no-op; a
-release failure cannot reopen the durable day.
+`IKeepAwakeController.Release()` hook. The production hook is an idempotent Windows
+display request; isolated callers may use the no-op. A release failure cannot reopen the
+durable day.
+
+Backup and export use SQLite's online backup operation rather than copying an open file.
+Every produced or selected database must pass `quick_check`, foreign-key integrity, and
+the exact known migration sequence. Restore stages the source, retains a validated live
+rollback image until post-replacement validation succeeds, and then reloads the runtime
+through Recovery Mode. Complete reset builds a fresh version-4 database and removes only
+the exact package LocalState backup, export, diagnostic, and app-setting data after
+confirmation. Prompt 8 adds no migration.
 
 Maintain an ordered schema-migration table. Once a migration reaches `main`, never edit,
 renumber, or reuse it; add a forward migration. Migration application is transactional
@@ -143,12 +153,44 @@ where SQLite permits it. Back up or fail clearly before any migration that canno
 safely reversible. Tests cover a fresh database and upgrades from every retained schema
 baseline.
 
+## Windows integration and local data safety
+
+`WindowsApplicationDataPaths` is the single package-identity-aware source for the live
+database, backup, export, and diagnostic locations. `WindowsUserSettings` owns only the
+keep-display-awake and full-screen-startup booleans. A disabled-by-default packaged
+startup task implements launch at sign-in and preserves Windows states controlled by the
+user in Task Manager or by policy.
+
+The App wraps `PowerManager.SystemSuspendStatusChanged` in a narrow event source. One
+`WindowsLifecycleCoordinator` serializes callbacks, commits the existing runtime's
+interruption checkpoint before observed suspend/close, releases keep-awake, and reloads
+the durable checkpoint on resume. Reload never invokes a resume command: active Focus,
+Landing, and Break checkpoints therefore appear as `RecoveryRequired` with unobserved
+time excluded. Unexpected power loss or forced process termination still relies on the
+existing periodic durable checkpoint and cannot be made transactional by desktop
+lifecycle notification.
+
+The user-controlled keep-awake setting uses only
+`Windows.System.Display.DisplayRequest`. It is acquired for actively accruing Focus,
+overtime, Landing, or Break and released for Ready, pause, boundaries, terminal states,
+Recovery, suspension, day close, and exit. It does not request system execution and does
+not override explicit sleep, lid-close, power, or shutdown actions. Optional full-screen
+startup changes only the initial `AppWindow` presenter; Focus/Break behavior is unchanged.
+
+Interfaces exist only for Windows calls that deterministic tests replace: application
+paths/settings, display keep-awake, startup task, Reduced Motion, and power events. They
+are Windows integration seams, not cross-platform adapters or a generalized service
+layer.
+
 ## Accessibility and diagnostics
 
 Support keyboard and touch, semantic labels, focus order, high contrast, text scaling,
 and Windows Reduced Motion. The blinking colon must not shift layout and becomes static
-when reduced motion applies. Diagnostic logs are local and exclude task content unless
-the user knowingly exports it.
+when reduced motion applies. The local JSON-lines diagnostic log accepts controlled
+event/result identifiers, UTC timestamps, and exception type names only. Its API has no
+arbitrary message field, so task titles, notes, Context Capsule content, selected paths,
+and exception messages are excluded by construction. Exported databases knowingly
+contain user data; diagnostics never do.
 
 The normal Focus visual state renders only the short focus label and segmented monospace
 timer. Controls are a collapsed overlay revealed by intentional pointer, tap, or keyboard

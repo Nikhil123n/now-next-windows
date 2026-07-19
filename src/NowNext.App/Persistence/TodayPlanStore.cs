@@ -3,14 +3,12 @@ using System.Globalization;
 using System.Reflection;
 using Microsoft.Data.Sqlite;
 using NowNext.Core.Domain;
-using Windows.Storage;
 using DomainTask = NowNext.Core.Domain.Task;
 
 namespace NowNext.App.Persistence;
 
 public sealed partial class TodayPlanStore : IDisposable
 {
-    private const string DatabaseFileName = "now-next.db";
     private const string DateFormat = "yyyy-MM-dd";
     private const string TimeFormat = "HH:mm:ss.fffffff";
     private const string TimestampFormat = "O";
@@ -50,12 +48,6 @@ public sealed partial class TodayPlanStore : IDisposable
 
         _databasePath = Path.GetFullPath(databasePath);
         _timeProvider = timeProvider ?? TimeProvider.System;
-    }
-
-    public static TodayPlanStore CreateForCurrentUser(TimeProvider? timeProvider = null)
-    {
-        string databasePath = Path.Combine(ApplicationData.Current.LocalFolder.Path, DatabaseFileName);
-        return new TodayPlanStore(databasePath, timeProvider);
     }
 
     public async System.Threading.Tasks.Task InitializeAsync(

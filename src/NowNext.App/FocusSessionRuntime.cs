@@ -9,14 +9,22 @@ public sealed class FocusSessionRuntime : IDisposable
 {
     private readonly TodayPlanStore _store;
     private readonly TimeProvider _timeProvider;
+    private readonly IKeepAwakeController _keepAwakeController;
+    private readonly Func<bool> _isKeepAwakeEnabled;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
     private FocusSession? _current;
     private bool _disposed;
 
-    public FocusSessionRuntime(TodayPlanStore store, TimeProvider? timeProvider = null)
+    public FocusSessionRuntime(
+        TodayPlanStore store,
+        TimeProvider? timeProvider = null,
+        IKeepAwakeController? keepAwakeController = null,
+        Func<bool>? isKeepAwakeEnabled = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _keepAwakeController = keepAwakeController ?? new NoOpKeepAwakeController();
+        _isKeepAwakeEnabled = isKeepAwakeEnabled ?? (() => false);
     }
 
     public FocusSession? Current => Volatile.Read(ref _current);
@@ -37,9 +45,11 @@ public sealed class FocusSessionRuntime : IDisposable
         try
         {
             SessionCheckpoint? checkpoint = await _store.LoadCurrentSessionAsync(cancellationToken);
-            Volatile.Write(ref _current, checkpoint is null
+            FocusSession? restored = checkpoint is null
                 ? null
-                : FocusSessionMachine.Restore(checkpoint, _timeProvider));
+                : FocusSessionMachine.Restore(checkpoint, _timeProvider);
+            Volatile.Write(ref _current, restored);
+            SynchronizeKeepAwake(restored);
         }
         finally
         {
@@ -83,6 +93,7 @@ public sealed class FocusSessionRuntime : IDisposable
                 plannedDuration);
             await PersistBeforePublishingAsync(candidate, null, cancellationToken);
             Volatile.Write(ref _current, candidate);
+            SynchronizeKeepAwake(candidate);
             return candidate;
         }
         finally
@@ -111,6 +122,7 @@ public sealed class FocusSessionRuntime : IDisposable
                 command as ParkSession,
                 cancellationToken);
             Volatile.Write(ref _current, transition.Session);
+            SynchronizeKeepAwake(transition.Session);
             return transition;
         }
         finally
@@ -146,6 +158,7 @@ public sealed class FocusSessionRuntime : IDisposable
                 interruptionObservation);
             await PersistBeforePublishingAsync(transition.Session, null, cancellationToken);
             Volatile.Write(ref _current, transition.Session);
+            SynchronizeKeepAwake(transition.Session);
         }
         finally
         {
@@ -175,6 +188,7 @@ public sealed class FocusSessionRuntime : IDisposable
             Volatile.Write(
                 ref _current,
                 FocusSessionMachine.Restore(checkpoint, _timeProvider));
+            SynchronizeKeepAwake(Volatile.Read(ref _current));
         }
         finally
         {
@@ -228,6 +242,11 @@ public sealed class FocusSessionRuntime : IDisposable
                 // The persisted closure remains authoritative if Windows rejects release.
             }
 
+            if (!ReferenceEquals(keepAwakeController, _keepAwakeController))
+            {
+                TryReleaseKeepAwake(_keepAwakeController);
+            }
+
             return closure;
         }
         finally
@@ -243,9 +262,45 @@ public sealed class FocusSessionRuntime : IDisposable
             return;
         }
 
+        TryReleaseKeepAwake(_keepAwakeController);
+        if (_keepAwakeController is IDisposable disposableController)
+        {
+            disposableController.Dispose();
+        }
+
         _operationGate.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
+    }
+
+    public void RefreshKeepAwake()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        SynchronizeKeepAwake(Volatile.Read(ref _current));
+    }
+
+    public async System.Threading.Tasks.Task PersistRecoveryCheckpointAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        await _operationGate.WaitAsync(cancellationToken);
+        try
+        {
+            FocusSession? current = Volatile.Read(ref _current);
+            if (current is null)
+            {
+                return;
+            }
+
+            SessionCheckpoint checkpoint = FocusSessionMachine.CreateCheckpoint(
+                current,
+                _timeProvider);
+            await _store.SaveCurrentSessionAsync(checkpoint, cancellationToken);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     private async System.Threading.Tasks.Task PersistBeforePublishingAsync(
@@ -272,6 +327,49 @@ public sealed class FocusSessionRuntime : IDisposable
             checkpoint,
             capsule,
             cancellationToken);
+    }
+
+    private void SynchronizeKeepAwake(FocusSession? session)
+    {
+        bool shouldBeActive = _isKeepAwakeEnabled()
+            && session?.State is (
+                FocusingSessionState
+                or OvertimeSessionState
+                or LandingSessionState
+                or BreakSessionState);
+        try
+        {
+            if (shouldBeActive)
+            {
+                _keepAwakeController.Acquire();
+            }
+            else
+            {
+                _keepAwakeController.Release();
+            }
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or System.Runtime.InteropServices.ExternalException
+                or ObjectDisposedException)
+        {
+            // Windows power integration cannot change the committed session transition.
+        }
+    }
+
+    private static void TryReleaseKeepAwake(IKeepAwakeController keepAwakeController)
+    {
+        try
+        {
+            keepAwakeController.Release();
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or System.Runtime.InteropServices.ExternalException
+                or ObjectDisposedException)
+        {
+            // Durable closure remains authoritative if Windows rejects release.
+        }
     }
 
     private sealed class CapturedTimeProvider : TimeProvider
