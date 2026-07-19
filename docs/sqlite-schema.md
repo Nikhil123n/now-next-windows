@@ -124,6 +124,26 @@ After closure, production task/session/settings/repair mutations for that date f
 Closure and any final DayClosed session checkpoint/ledger update commit together before
 keep-awake release is requested.
 
+## Local backup, export, restore, and reset
+
+Prompt 8 does not change the schema version. Backup and export use SQLite's online
+backup API so an open live database is copied as one consistent image. The image is
+accepted only after `PRAGMA quick_check`, `PRAGMA foreign_key_check`, and validation of
+the exact version/name sequence for migrations 1–4. A file with a missing, future,
+renamed, non-contiguous, or incomplete registry is not restorable.
+
+Restore first copies and validates the selected source into package-local staging. It
+then creates and validates a rollback image of the live database, replaces the live
+pages through SQLite backup, and validates the result before discarding rollback. If
+replacement or post-validation fails, the rollback image restores the previous live
+database. Active work is interrupted and committed before replacement, and the restored
+checkpoint is loaded through Recovery Mode rather than resumed.
+
+Complete reset creates a new fully migrated empty database and uses the same guarded
+replacement path. After success it removes database sidecars plus backup, export,
+diagnostic, and app-setting data only beneath the exact package LocalState root. It does
+not delete task rows one by one or edit retained migration SQL.
+
 ## Migration safety
 
 Initialization creates the migration registry and applies missing migrations in order in

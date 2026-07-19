@@ -10,11 +10,13 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using NowNext.App.Persistence;
 using NowNext.App.Presentation;
+using NowNext.App.WindowsIntegration;
 using NowNext.Core.Domain;
 using NowNext.Core.Planning;
 using NowNext.Core.Sessions;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.System;
-using Windows.UI.ViewManagement;
 using WinRT.Interop;
 using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 using DomainTask = NowNext.Core.Domain.Task;
@@ -30,10 +32,14 @@ public sealed partial class MainWindow : Window
     private readonly TodayPlanStore? _store;
     private readonly FocusSessionRuntime? _sessionRuntime;
     private readonly IKeepAwakeController? _keepAwakeController;
+    private readonly WindowsLifecycleCoordinator? _lifecycleCoordinator;
+    private readonly DataMaintenanceService? _dataMaintenanceService;
+    private readonly IWindowsUserSettings? _userSettings;
+    private readonly ILaunchAtSignInService? _launchAtSignInService;
+    private readonly IReducedMotionPreference? _reducedMotionPreference;
     private readonly DispatcherQueueTimer _focusProjectionTimer;
     private readonly DispatcherQueueTimer _colonTimer;
     private readonly DispatcherQueueTimer _controlsInactivityTimer;
-    private readonly UISettings _uiSettings = new();
     private AppWindow? _appWindow;
     private DomainTask? _editingTask;
     private DomainTask? _focusedTask;
@@ -51,12 +57,26 @@ public sealed partial class MainWindow : Window
     public MainWindow(
         TodayPlanStore store,
         FocusSessionRuntime sessionRuntime,
-        IKeepAwakeController keepAwakeController)
+        IKeepAwakeController keepAwakeController,
+        WindowsLifecycleCoordinator lifecycleCoordinator,
+        DataMaintenanceService dataMaintenanceService,
+        IWindowsUserSettings userSettings,
+        ILaunchAtSignInService launchAtSignInService,
+        IReducedMotionPreference reducedMotionPreference)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _sessionRuntime = sessionRuntime ?? throw new ArgumentNullException(nameof(sessionRuntime));
         _keepAwakeController = keepAwakeController
             ?? throw new ArgumentNullException(nameof(keepAwakeController));
+        _lifecycleCoordinator = lifecycleCoordinator
+            ?? throw new ArgumentNullException(nameof(lifecycleCoordinator));
+        _dataMaintenanceService = dataMaintenanceService
+            ?? throw new ArgumentNullException(nameof(dataMaintenanceService));
+        _userSettings = userSettings ?? throw new ArgumentNullException(nameof(userSettings));
+        _launchAtSignInService = launchAtSignInService
+            ?? throw new ArgumentNullException(nameof(launchAtSignInService));
+        _reducedMotionPreference = reducedMotionPreference
+            ?? throw new ArgumentNullException(nameof(reducedMotionPreference));
         InitializeComponent();
         _focusProjectionTimer = DispatcherQueue.CreateTimer();
         _focusProjectionTimer.Interval = TimeSpan.FromMilliseconds(250);
@@ -102,6 +122,41 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    internal async System.Threading.Tasks.Task HandleRecoveryReloadedAsync()
+    {
+        if (_sessionRuntime?.Current is not { } current || _store is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await ReloadTodayAsync();
+            _focusedTask = TodayItems
+                .Select(item => item.Task)
+                .SingleOrDefault(task => task.Id == current.TaskId);
+            if (_focusedTask is null)
+            {
+                SetStatus("The saved focus session does not match today's plan.");
+                return;
+            }
+
+            if (IsBreakState(current.State))
+            {
+                await PrepareReturningContextAsync(GetOutcome(current.State));
+                ShowBreakScreen();
+            }
+            else if (current.State is RecoveryRequiredSessionState)
+            {
+                ShowFocusScreen();
+            }
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            SetStatus("NOW/NEXT could not restore the recovery view after resume.");
+        }
+    }
+
     private async void OnRootLoaded(object sender, RoutedEventArgs args)
     {
         ConfigureAppWindow();
@@ -116,6 +171,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            await LoadWindowsSettingsAsync();
             await ReloadTodayAsync();
             if (_workdaySnapshot?.Closure is { } closure)
             {
@@ -172,16 +228,326 @@ public sealed partial class MainWindow : Window
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(windowHandle);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         _appWindow.Closing += OnAppWindowClosing;
+        if (_userSettings?.StartFullScreen == true)
+        {
+            _appWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+        }
     }
 
-    private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    private async System.Threading.Tasks.Task LoadWindowsSettingsAsync()
     {
-        if (_allowClose || _closeCheckpointInProgress || _sessionRuntime is null)
+        if (_userSettings is null
+            || _launchAtSignInService is null
+            || _reducedMotionPreference is null)
+        {
+            WindowsDataSettingsPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        KeepDisplayAwakeCheckBox.IsChecked = _userSettings.KeepDisplayAwakeDuringSessions;
+        StartFullScreenCheckBox.IsChecked = _userSettings.StartFullScreen;
+        ReducedMotionStatusText.Text = _reducedMotionPreference.IsReducedMotionEnabled
+            ? "Windows Reduced Motion is on; the timer colon stays visible."
+            : "Windows Reduced Motion is off; the timer colon blinks once per second.";
+
+        try
+        {
+            ApplyLaunchAtSignInState(await _launchAtSignInService.GetStateAsync());
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or UnauthorizedAccessException
+                or System.Runtime.InteropServices.ExternalException)
+        {
+            LaunchAtSignInCheckBox.IsChecked = false;
+            LaunchAtSignInCheckBox.IsEnabled = false;
+            LaunchAtSignInCheckBox.Content = "Launch at sign-in is unavailable";
+        }
+    }
+
+    private async void OnLaunchAtSignInClick(object sender, RoutedEventArgs args)
+    {
+        if (_launchAtSignInService is null)
         {
             return;
         }
 
-        FocusSession? current = _sessionRuntime.Current;
+        try
+        {
+            bool enabled = LaunchAtSignInCheckBox.IsChecked == true;
+            LaunchAtSignInState state = await _launchAtSignInService.SetEnabledAsync(enabled);
+            ApplyLaunchAtSignInState(state);
+            DataMaintenanceStatusText.Text = state switch
+            {
+                LaunchAtSignInState.Enabled or LaunchAtSignInState.EnabledByPolicy =>
+                    "NOW/NEXT will launch after Windows sign-in.",
+                LaunchAtSignInState.DisabledByUser =>
+                    "Launch at sign-in is disabled in Windows Task Manager.",
+                LaunchAtSignInState.DisabledByPolicy =>
+                    "Launch at sign-in is disabled by Windows policy.",
+                _ => "Launch at sign-in is off.",
+            };
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+                or UnauthorizedAccessException
+                or System.Runtime.InteropServices.ExternalException)
+        {
+            DataMaintenanceStatusText.Text = "Windows could not change launch at sign-in.";
+            await LoadWindowsSettingsAsync();
+        }
+    }
+
+    private void OnKeepDisplayAwakeClick(object sender, RoutedEventArgs args)
+    {
+        if (_userSettings is null || _sessionRuntime is null)
+        {
+            return;
+        }
+
+        _userSettings.KeepDisplayAwakeDuringSessions =
+            KeepDisplayAwakeCheckBox.IsChecked == true;
+        _sessionRuntime.RefreshKeepAwake();
+        DataMaintenanceStatusText.Text = _userSettings.KeepDisplayAwakeDuringSessions
+            ? "The display stays awake only while an active session is accruing time."
+            : "Display keep-awake is off.";
+    }
+
+    private void OnStartFullScreenClick(object sender, RoutedEventArgs args)
+    {
+        if (_userSettings is null)
+        {
+            return;
+        }
+
+        _userSettings.StartFullScreen = StartFullScreenCheckBox.IsChecked == true;
+        DataMaintenanceStatusText.Text = _userSettings.StartFullScreen
+            ? "NOW/NEXT will open full screen on its next launch."
+            : "NOW/NEXT will use a normal window on its next launch.";
+    }
+
+    private async void OnBackupClick(object sender, RoutedEventArgs args)
+    {
+        if (_dataMaintenanceService is null || _sessionRuntime is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _sessionRuntime.PersistRecoveryCheckpointAsync();
+            string backupPath = await _dataMaintenanceService.CreateBackupAsync();
+            DataMaintenanceStatusText.Text =
+                $"Validated local backup created: {Path.GetFileName(backupPath)}";
+        }
+        catch (Exception exception) when (IsDataMaintenanceFailure(exception))
+        {
+            DataMaintenanceStatusText.Text = "The local backup could not be created.";
+        }
+    }
+
+    private async void OnExportClick(object sender, RoutedEventArgs args)
+    {
+        if (_dataMaintenanceService is null || _sessionRuntime is null)
+        {
+            return;
+        }
+
+        var picker = new FileSavePicker
+        {
+            SuggestedFileName = "now-next-export",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+        };
+        picker.FileTypeChoices.Add("SQLite database", [".db"]);
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        StorageFile? selectedFile = await picker.PickSaveFileAsync();
+        if (selectedFile is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _sessionRuntime.PersistRecoveryCheckpointAsync();
+            await _dataMaintenanceService.ExportAsync(selectedFile.Path);
+            DataMaintenanceStatusText.Text = "A validated local export was created.";
+        }
+        catch (Exception exception) when (IsDataMaintenanceFailure(exception))
+        {
+            DataMaintenanceStatusText.Text = "The local export could not be created.";
+        }
+    }
+
+    private async void OnRestoreClick(object sender, RoutedEventArgs args)
+    {
+        if (_dataMaintenanceService is null || _sessionRuntime is null)
+        {
+            return;
+        }
+
+        var picker = new FileOpenPicker
+        {
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            ViewMode = PickerViewMode.List,
+        };
+        picker.FileTypeFilter.Add(".db");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        StorageFile? selectedFile = await picker.PickSingleFileAsync();
+        if (selectedFile is null)
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = "Restore local data?",
+            Content = new TextBlock
+            {
+                Text = "The selected database will be validated before it replaces current local data. Active work will return through Recovery Mode.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "Validate and restore",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = RootGrid.XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await ReplaceLocalDataAsync(
+            async () => await _dataMaintenanceService.RestoreAsync(selectedFile.Path),
+            "Local data was restored. Review Recovery Mode before continuing.",
+            "The selected database was not restored.");
+    }
+
+    private async void OnResetDataClick(object sender, RoutedEventArgs args)
+    {
+        if (_dataMaintenanceService is null
+            || _sessionRuntime is null
+            || _userSettings is null
+            || _launchAtSignInService is null)
+        {
+            return;
+        }
+
+        var confirmation = new CheckBox
+        {
+            Content = "I understand this removes tasks, sessions, settings, backups, exports, and diagnostics from this app.",
+            IsChecked = false,
+            MinHeight = 44,
+        };
+        AutomationProperties.SetName(
+            confirmation,
+            "Confirm permanent removal of all local NOW/NEXT data");
+        var dialog = new ContentDialog
+        {
+            Title = "Completely reset local data?",
+            Content = confirmation,
+            PrimaryButtonText = "Reset all local data",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            IsPrimaryButtonEnabled = false,
+            XamlRoot = RootGrid.XamlRoot,
+        };
+        confirmation.Checked += (_, _) => dialog.IsPrimaryButtonEnabled = true;
+        confirmation.Unchecked += (_, _) => dialog.IsPrimaryButtonEnabled = false;
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await ReplaceLocalDataAsync(
+            async () => await _dataMaintenanceService.ResetAsync(
+                _userSettings,
+                _launchAtSignInService),
+            "All prior local data was removed. NOW/NEXT is ready for a fresh day.",
+            "Local data was not reset.");
+    }
+
+    private async System.Threading.Tasks.Task ReplaceLocalDataAsync(
+        Func<System.Threading.Tasks.Task> replaceOperation,
+        string successMessage,
+        string failureMessage)
+    {
+        if (_sessionRuntime is null)
+        {
+            return;
+        }
+
+        _commandInProgress = true;
+        _focusProjectionTimer.Stop();
+        _colonTimer.Stop();
+        _controlsInactivityTimer.Stop();
+        try
+        {
+            await _sessionRuntime.InterruptForSuspensionAsync();
+            await replaceOperation();
+            await _sessionRuntime.ReloadAfterResumeAsync();
+            await ReloadTodayAsync();
+            if (_workdaySnapshot?.Closure is { } closure)
+            {
+                ShowRestingScreen(closure);
+            }
+            else if (_sessionRuntime.Current?.State is RecoveryRequiredSessionState)
+            {
+                await HandleRecoveryReloadedAsync();
+            }
+            else
+            {
+                await ShowTodayScreenAsync();
+            }
+
+            DataMaintenanceStatusText.Text = successMessage;
+            await LoadWindowsSettingsAsync();
+        }
+        catch (Exception exception) when (IsDataMaintenanceFailure(exception))
+        {
+            DataMaintenanceStatusText.Text = failureMessage;
+            try
+            {
+                await _sessionRuntime.ReloadAfterResumeAsync();
+                if (_sessionRuntime.Current?.State is RecoveryRequiredSessionState)
+                {
+                    await HandleRecoveryReloadedAsync();
+                }
+            }
+            catch (Exception recoveryException) when (IsExpectedFailure(recoveryException))
+            {
+                SetStatus("NOW/NEXT could not reload recovery state after local data maintenance.");
+            }
+        }
+        finally
+        {
+            _commandInProgress = false;
+        }
+    }
+
+    private void ApplyLaunchAtSignInState(LaunchAtSignInState state)
+    {
+        LaunchAtSignInCheckBox.IsChecked = state is
+            LaunchAtSignInState.Enabled or LaunchAtSignInState.EnabledByPolicy;
+        LaunchAtSignInCheckBox.IsEnabled = state is
+            LaunchAtSignInState.Disabled or LaunchAtSignInState.Enabled;
+        LaunchAtSignInCheckBox.Content = state switch
+        {
+            LaunchAtSignInState.DisabledByUser =>
+                "Launch at sign-in (disabled in Windows Task Manager)",
+            LaunchAtSignInState.DisabledByPolicy or LaunchAtSignInState.EnabledByPolicy =>
+                "Launch at sign-in (managed by Windows policy)",
+            _ => "Launch at sign-in",
+        };
+    }
+
+    private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_allowClose || _closeCheckpointInProgress || _lifecycleCoordinator is null)
+        {
+            return;
+        }
+
+        FocusSession? current = _sessionRuntime?.Current;
         if (current?.State is not (
             FocusingSessionState
             or OvertimeSessionState
@@ -195,7 +561,7 @@ public sealed partial class MainWindow : Window
         _closeCheckpointInProgress = true;
         try
         {
-            await _sessionRuntime.InterruptForSuspensionAsync();
+            await _lifecycleCoordinator.PersistBeforeExitAsync();
         }
         catch (Exception exception) when (IsExpectedFailure(exception))
         {
@@ -772,7 +1138,7 @@ public sealed partial class MainWindow : Window
 
     private void OnColonTimerTick(DispatcherQueueTimer sender, object args)
     {
-        if (!_uiSettings.AnimationsEnabled)
+        if (_reducedMotionPreference?.IsReducedMotionEnabled == true)
         {
             _colonVisible = true;
         }
@@ -2017,6 +2383,16 @@ public sealed partial class MainWindow : Window
             or InvalidOperationException
             or InvalidDataException
             or TodayPlanStorageException;
+    }
+
+    private static bool IsDataMaintenanceFailure(Exception exception)
+    {
+        return IsExpectedFailure(exception)
+            || exception is
+                DataMaintenanceException
+                or IOException
+                or UnauthorizedAccessException
+                or System.Runtime.InteropServices.ExternalException;
     }
 
     private static bool IsValidTimeSpanMinutes(double minutes)

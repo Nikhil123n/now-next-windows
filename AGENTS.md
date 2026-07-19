@@ -27,6 +27,11 @@ Motion calls for a static colon.
 - The current vertical slice includes plain Today planning and the minimal Focus view on
   top of the authoritative Core session engine, durable Context Capsules, bounded Breaks,
   recovery checkpoints, deterministic same-day repair, and durable Shutdown.
+- Windows integration is App-owned. Display keep-awake is user-controlled, applies only
+  while active session time accrues, and must release for pause, Recovery, suspension,
+  day close, and exit without blocking explicit sleep, lid, power, or shutdown actions.
+- Backup/export/restore/reset must use validated SQLite operations and exact LocalState
+  path checks. Default diagnostics accept no user-authored task or Context Capsule text.
 - Do not infer permission for visual polish, background services, optimizer menus,
   general history UI, wellness engines, multi-day planning, or another focus mode from
   this slice.

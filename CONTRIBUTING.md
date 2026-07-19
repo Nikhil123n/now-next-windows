@@ -51,4 +51,8 @@ A change is done when:
 - documentation and decisions match the implementation;
 - repository validation, formatting, Release build, and tests pass when applicable;
 - no task content enters diagnostics, and no cloud or cross-platform dependency appears;
+- Windows lifecycle changes release display requests on every inactive/exit path and
+  include deterministic fake-service tests plus the applicable Surface manual checks;
+- backup/restore/reset changes validate SQLite integrity, migration compatibility, and
+  exact package-local destructive targets;
 - the pull request states checks run, checks skipped with reasons, and remaining risk.

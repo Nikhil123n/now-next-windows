@@ -51,6 +51,13 @@ same-day repair proposal with transactional acceptance and safe latest-repair un
 protected daily shutdown settings, durable work totals, explicit Shutdown, and a
 restart-safe resting state.
 
+The current Windows dependability slice adds package-local application-data paths,
+user-controlled display keep-awake during actively accruing sessions, launch at sign-in,
+Reduced Motion and optional full-screen startup preferences, serialized suspend/resume
+recovery, privacy-safe local diagnostics, and validated local backup/export/restore/reset.
+It does not add a background service, prevent explicit sleep/lid/power actions, or move
+session authority out of Core.
+
 The UI is not a general task manager and the DispatcherQueue refresh only requests Core
 projections and durability checkpoints; it never owns elapsed time. This phase does not
 add a background service, wellness recommendation engine, independent health clocks,

@@ -10,3 +10,4 @@ history to hide an earlier choice.
 - [0003 — SQLite persistence and migrations](0003-sqlite-persistence-and-migrations.md)
 - [0004 — App-owned SQLite persistence](0004-app-owned-sqlite-persistence.md)
 - [0005 — Deterministic repair and durable day closure](0005-deterministic-repair-and-day-closure.md)
+- [0006 — Windows lifecycle and local data safety](0006-windows-lifecycle-and-local-data-safety.md)

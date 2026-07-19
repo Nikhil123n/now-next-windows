@@ -49,6 +49,13 @@ The known WinUI generated-file workspace diagnostic is informational only when
 - A static Prompt 7 contract check that Today exposes one calm proposal, Recovery choices
   appear in deliberate order with accessible 44-pixel targets, Shutdown defaults to no
   mutation until confirmation, and no red overdue-task wall is present.
+- App-level fake Windows services verify display-request acquire/release boundaries,
+  serialized suspend/resume and exit checkpoints, Recovery routing without away time,
+  startup/settings reset behavior, and controlled diagnostic fields without sleeps.
+- SQLite online backup/export/restore/reset tests verify exact round trips, independent
+  loadable copies, corruption rejection without live-data loss, pre-cancellation, and
+  package-local cleanup. Static WinUI/manifest checks require accessible touch targets,
+  explicit restore/reset confirmation, and a startup task disabled by default.
 
 SQLite tests use unique temporary database paths and never access the packaged user's
 LocalState. WinUI controls are not instantiated in the MTP test process because the
@@ -57,7 +64,10 @@ test harness.
 
 ## Windows UI verification
 
-Run the [Prompt 7 manual test script](prompt-7-manual-test-script.md) on Windows 11 for
+Run the [Prompt 8 Surface hardware test](prompt-8-surface-hardware-test.md) on the target
+device for touch, display idle/wake, explicit sleep, lid-close, Modern Standby resume,
+autostart, battery, long-running focus, and local backup/restore/reset behavior. Run the
+[Prompt 7 manual test script](prompt-7-manual-test-script.md) on Windows 11 for
 repair review/accept/undo, protected Fixed/shutdown changes, late Recovery, explicit
 outcomes, close-early, durable Shutdown, and the resting state. Run the
 [Prompt 6 manual test script](prompt-6-manual-test-script.md) for
@@ -68,7 +78,7 @@ high contrast, text scaling, and Reduced Motion. The
 Hardware suspend/Modern Standby remains a manual integration check and does not justify a
 background service.
 
-Later P0 milestones may expose deliberately approved general history and Windows
-integration without changing these repair/recovery invariants. Prototype success still
+Later milestones may expose deliberately approved general history without changing these
+repair/recovery or Windows power invariants. Prototype success still
 requires 10–14 real working days without lost state, invented time, silent Fixed
 movement, or cloud availability.

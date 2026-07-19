@@ -76,6 +76,7 @@ $requiredFiles = @(
     'docs\decisions\0003-sqlite-persistence-and-migrations.md',
     'docs\decisions\0004-app-owned-sqlite-persistence.md',
     'docs\decisions\0005-deterministic-repair-and-day-closure.md',
+    'docs\decisions\0006-windows-lifecycle-and-local-data-safety.md',
     'docs\plans\PLAN_TEMPLATE.md',
     'docs\plans\prompt-2-application-scaffold.md',
     'docs\plans\prompt-3-today-domain-and-sqlite.md',
@@ -83,12 +84,14 @@ $requiredFiles = @(
     'docs\plans\prompt-5-today-focus-vertical-slice.md',
     'docs\plans\prompt-6-context-break-journey.md',
     'docs\plans\prompt-7-schedule-recovery-shutdown.md',
+    'docs\plans\prompt-8-windows-integration-and-data-safety.md',
     'docs\sqlite-schema.md',
     'docs\timer-invariants.md',
     'docs\testing\README.md',
     'docs\testing\prompt-5-manual-test-script.md',
     'docs\testing\prompt-6-manual-test-script.md',
     'docs\testing\prompt-7-manual-test-script.md',
+    'docs\testing\prompt-8-surface-hardware-test.md',
     'scripts\Database-Dev.ps1',
     'scripts\Verify.ps1',
     'scripts\Validate-AgentSkills.ps1',
@@ -104,6 +107,7 @@ $requiredFiles = @(
     'src\NowNext.App\MainWindow.xaml.cs',
     'src\NowNext.App\NowNext.App.csproj',
     'src\NowNext.App\Package.appxmanifest',
+    'src\NowNext.App\Diagnostics\LocalDiagnosticLog.cs',
     'src\NowNext.App\Persistence\Migrations\0001_initial_today_plan.sql',
     'src\NowNext.App\Persistence\Migrations\0002_current_focus_session_checkpoint.sql',
     'src\NowNext.App\Persistence\Migrations\0003_context_capsules_and_break_recovery.sql',
@@ -111,10 +115,13 @@ $requiredFiles = @(
     'src\NowNext.App\Persistence\BreakSettings.cs',
     'src\NowNext.App\Persistence\DayClosure.cs',
     'src\NowNext.App\Persistence\DaySettings.cs',
+    'src\NowNext.App\Persistence\DataMaintenanceException.cs',
+    'src\NowNext.App\Persistence\DataMaintenanceService.cs',
     'src\NowNext.App\Persistence\TodayPlanStorageException.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.Sessions.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.Context.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.Workday.cs',
+    'src\NowNext.App\Persistence\TodayPlanStore.Maintenance.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.cs',
     'src\NowNext.App\app.manifest',
     'src\NowNext.App\packages.lock.json',
@@ -122,6 +129,13 @@ $requiredFiles = @(
     'src\NowNext.App\Presentation\TaskEditorInput.cs',
     'src\NowNext.App\Presentation\TimerDisplayFormatter.cs',
     'src\NowNext.App\Presentation\TodayTaskItem.cs',
+    'src\NowNext.App\WindowsIntegration\ApplicationDataPaths.cs',
+    'src\NowNext.App\WindowsIntegration\LaunchAtSignInService.cs',
+    'src\NowNext.App\WindowsIntegration\ReducedMotionPreference.cs',
+    'src\NowNext.App\WindowsIntegration\WindowsDisplayKeepAwakeController.cs',
+    'src\NowNext.App\WindowsIntegration\WindowsLifecycleCoordinator.cs',
+    'src\NowNext.App\WindowsIntegration\WindowsPowerEventSource.cs',
+    'src\NowNext.App\WindowsIntegration\WindowsUserSettings.cs',
     'src\NowNext.Core\NowNext.Core.csproj',
     'src\NowNext.Core\Domain\ScheduleEntry.cs',
     'src\NowNext.Core\Domain\ScheduleType.cs',
@@ -160,6 +174,7 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\Presentation\TaskEditorInputTests.cs',
     'tests\NowNext.Core.Tests\Presentation\TimerDisplayFormatterTests.cs',
     'tests\NowNext.Core.Tests\Presentation\WorkdayViewContractTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\WindowsIntegrationViewContractTests.cs',
     'tests\NowNext.Core.Tests\Runtime\FocusSessionRuntimeTests.cs',
     'tests\NowNext.Core.Tests\Sessions\FocusSessionMachineTests.cs',
     'tests\NowNext.Core.Tests\Sessions\ContextCapsuleTests.cs',
@@ -167,6 +182,11 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\Sessions\SessionTestClock.cs',
     'tests\NowNext.Core.Tests\Sessions\SessionTransitionMatrixTests.cs',
     'tests\NowNext.Core.Tests\TestSupport.cs',
+    'tests\NowNext.Core.Tests\WindowsIntegration\DataMaintenanceServiceTests.cs',
+    'tests\NowNext.Core.Tests\WindowsIntegration\KeepAwakeRuntimeTests.cs',
+    'tests\NowNext.Core.Tests\WindowsIntegration\LocalDiagnosticLogTests.cs',
+    'tests\NowNext.Core.Tests\WindowsIntegration\WindowsLifecycleCoordinatorTests.cs',
+    'tests\NowNext.Core.Tests\WindowsIntegration\WindowsServiceFakes.cs',
     'tests\NowNext.Core.Tests\packages.lock.json'
 )
 
@@ -183,8 +203,10 @@ $requiredDirectories = @(
     'docs\decisions',
     'docs\plans',
     'docs\testing',
+    'src\NowNext.App\Diagnostics',
     'src\NowNext.App\Persistence\Migrations',
     'src\NowNext.App\Presentation',
+    'src\NowNext.App\WindowsIntegration',
     'src\NowNext.Core\Domain',
     'src\NowNext.Core\Planning',
     'src\NowNext.Core\Sessions',
@@ -194,6 +216,7 @@ $requiredDirectories = @(
     'tests\NowNext.Core.Tests\Presentation',
     'tests\NowNext.Core.Tests\Runtime',
     'tests\NowNext.Core.Tests\Sessions',
+    'tests\NowNext.Core.Tests\WindowsIntegration',
     'src\NowNext.App',
     'src\NowNext.Core',
     'tests\NowNext.Core.Tests'
@@ -455,11 +478,34 @@ foreach ($difference in @(Compare-Object $expectedMigrations $migrationFiles)) {
     Add-ValidationError "Current migration mismatch: $($difference.InputObject)"
 }
 
+$packageManifestPath = Join-Path $repositoryRoot 'src\NowNext.App\Package.appxmanifest'
+if (Test-Path -LiteralPath $packageManifestPath -PathType Leaf) {
+    [xml] $packageManifest = Get-Content -LiteralPath $packageManifestPath -Encoding UTF8 -Raw
+    $namespaceManager = [System.Xml.XmlNamespaceManager]::new($packageManifest.NameTable)
+    $namespaceManager.AddNamespace('desktop', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10')
+    $startupTasks = @($packageManifest.SelectNodes('//desktop:StartupTask', $namespaceManager))
+    if ($startupTasks.Count -ne 1 -or
+        $startupTasks[0].TaskId -ne 'NowNextStartupTask' -or
+        $startupTasks[0].Enabled -ne 'false') {
+        Add-ValidationError 'Package manifest must declare exactly one NOW/NEXT startup task disabled by default.'
+    }
+}
+
+$diagnosticLogPath = Join-Path $repositoryRoot 'src\NowNext.App\Diagnostics\LocalDiagnosticLog.cs'
+if (Test-Path -LiteralPath $diagnosticLogPath -PathType Leaf) {
+    $diagnosticLogSource = Get-Content -LiteralPath $diagnosticLogPath -Encoding UTF8 -Raw
+    foreach ($prohibitedDiagnosticField in @('TaskTitle', 'ContextCapsule', 'ExceptionMessage')) {
+        if ($diagnosticLogSource.Contains($prohibitedDiagnosticField)) {
+            Add-ValidationError "Local diagnostic schema contains prohibited field: $prohibitedDiagnosticField"
+        }
+    }
+}
+
 $documentationRequirements = @{
     'AGENTS.md' = 'deterministic same-day repair'
     'ARCHITECTURE.md' = 'focus-session ledger'
     'SCOPE.md' = '## Current vertical-slice boundary'
-    'docs\testing\README.md' = 'Prompt 7 manual test script'
+    'docs\testing\README.md' = 'Prompt 8 Surface hardware test'
     'docs\sqlite-schema.md' = 'Version 4 schedule repair'
     'docs\timer-invariants.md' = 'at least 15'
 }
