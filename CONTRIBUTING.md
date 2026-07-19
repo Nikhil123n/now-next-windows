@@ -55,4 +55,7 @@ A change is done when:
   include deterministic fake-service tests plus the applicable Surface manual checks;
 - backup/restore/reset changes validate SQLite integrity, migration compatibility, and
   exact package-local destructive targets;
+- release-candidate changes run the complete canonical command, verify the generated
+  package signer/hash, record measurements without invented limits, and distinguish
+  automated evidence from manual or unrun Surface checks;
 - the pull request states checks run, checks skipped with reasons, and remaining risk.

@@ -58,6 +58,12 @@ recovery, privacy-safe local diagnostics, and validated local backup/export/rest
 It does not add a background service, prevent explicit sleep/lid/power actions, or move
 session authority out of Core.
 
+The release-candidate qualification layer adds deterministic journey/restart/migration/
+data-safety coverage, Windows measurement and recovery commands, a locally self-signed
+owner-only MSIX, and recorded manual Surface checks. These are verification and
+distribution artifacts only; they do not expand product scope or establish production
+signing, Store publishing, automatic updates, telemetry, or support for another device.
+
 The UI is not a general task manager and the DispatcherQueue refresh only requests Core
 projections and durability checkpoints; it never owns elapsed time. This phase does not
 add a background service, wellness recommendation engine, independent health clocks,

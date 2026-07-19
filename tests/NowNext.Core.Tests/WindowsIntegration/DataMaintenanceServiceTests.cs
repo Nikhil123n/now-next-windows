@@ -1,6 +1,8 @@
+using NowNext.App;
 using NowNext.App.Persistence;
 using NowNext.App.WindowsIntegration;
 using NowNext.Core.Domain;
+using NowNext.Core.Sessions;
 using DomainTask = NowNext.Core.Domain.Task;
 
 namespace NowNext.Core.Tests.WindowsIntegration;
@@ -58,6 +60,79 @@ public sealed class DataMaintenanceServiceTests
         Assert.AreEqual("Original task title", entry.Task.FullTitle);
         Assert.IsTrue(File.Exists(backupPath));
         Assert.HasCount(2, diagnostics.Entries);
+    }
+
+    [TestMethod]
+    [Timeout(15_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task BackupRestorePreservesCapsuleSettingsAndActiveRecovery()
+    {
+        using var localState = new TestLocalState();
+        var clock = new ManualTimeProvider(InitialUtc);
+        DomainTask parkedTask = TestTaskFactory.Create(
+            fullTitle: "Parked before backup",
+            scheduleType: ScheduleType.Flexible);
+        DomainTask activeTask = TestTaskFactory.Create(
+            fullTitle: "Active before backup",
+            timingMode: TimingMode.Countdown,
+            scheduleType: ScheduleType.Flexible);
+        using var store = new TodayPlanStore(localState.Paths.DatabasePath, clock);
+        await store.CreateTaskAsync(parkedTask, _testContext.CancellationToken);
+        await store.CreateTaskAsync(activeTask, _testContext.CancellationToken);
+        using var runtime = new FocusSessionRuntime(store, clock);
+        await runtime.InitializeAsync(_testContext.CancellationToken);
+        await runtime.CreateAsync(
+            new SessionId(Guid.NewGuid()),
+            parkedTask.Id,
+            parkedTask.TimingMode,
+            parkedTask.PlannedDuration,
+            _testContext.CancellationToken);
+        await runtime.ExecuteAsync(new StartSession(), _testContext.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(2));
+        await runtime.ExecuteAsync(
+            new ParkSession("Open the saved section", "Backup capsule"),
+            _testContext.CancellationToken);
+        await runtime.CreateAsync(
+            new SessionId(Guid.NewGuid()),
+            activeTask.Id,
+            activeTask.TimingMode,
+            activeTask.PlannedDuration,
+            _testContext.CancellationToken);
+        await runtime.ExecuteAsync(new StartSession(), _testContext.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(4));
+        await runtime.ExecuteAsync(new RefreshSession(), _testContext.CancellationToken);
+        TodayPlan beforeBackup = await store.LoadTodayPlanAsync(
+            _testContext.CancellationToken);
+        await store.SaveDaySettingsAsync(
+            new DaySettings(beforeBackup.Date, new TimeOnly(17, 0), activeTask.Id),
+            _testContext.CancellationToken);
+        using var maintenance = new DataMaintenanceService(
+            localState.Paths,
+            new FakeDiagnosticLog(),
+            clock);
+        string backupPath = await maintenance.CreateBackupAsync(
+            _testContext.CancellationToken);
+
+        await store.SaveDaySettingsAsync(
+            new DaySettings(beforeBackup.Date, new TimeOnly(18, 0)),
+            _testContext.CancellationToken);
+        await maintenance.RestoreAsync(backupPath, _testContext.CancellationToken);
+        clock.Advance(TimeSpan.FromHours(2));
+        await runtime.ReloadAfterResumeAsync(_testContext.CancellationToken);
+        WorkdaySnapshot restoredWorkday = await store.LoadWorkdaySnapshotAsync(
+            _testContext.CancellationToken);
+        ContextCapsule? restoredCapsule = await store.LoadLatestContextCapsuleAsync(
+            parkedTask.Id,
+            _testContext.CancellationToken);
+        RecoveryRequiredSessionState recovery =
+            Assert.IsInstanceOfType<RecoveryRequiredSessionState>(runtime.Current!.State);
+
+        Assert.IsNotNull(restoredWorkday.Settings);
+        Assert.AreEqual(new TimeOnly(17, 0), restoredWorkday.Settings.ShutdownTime);
+        Assert.AreEqual(activeTask.Id, restoredWorkday.Settings.DailyWinTaskId);
+        Assert.IsNotNull(restoredCapsule);
+        Assert.AreEqual("Open the saved section", restoredCapsule.NextPhysicalAction);
+        Assert.AreEqual(ActiveSessionPhase.Focusing, recovery.InterruptedPhase);
+        Assert.AreEqual(TimeSpan.FromMinutes(4), runtime.Current.CommittedActiveDuration);
     }
 
     [TestMethod]
