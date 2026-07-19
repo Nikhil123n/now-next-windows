@@ -80,10 +80,12 @@ $requiredFiles = @(
     'docs\plans\prompt-3-today-domain-and-sqlite.md',
     'docs\plans\prompt-4-authoritative-timer-state-machine.md',
     'docs\plans\prompt-5-today-focus-vertical-slice.md',
+    'docs\plans\prompt-6-context-break-journey.md',
     'docs\sqlite-schema.md',
     'docs\timer-invariants.md',
     'docs\testing\README.md',
     'docs\testing\prompt-5-manual-test-script.md',
+    'docs\testing\prompt-6-manual-test-script.md',
     'scripts\Database-Dev.ps1',
     'scripts\Verify.ps1',
     'scripts\Validate-AgentSkills.ps1',
@@ -100,8 +102,11 @@ $requiredFiles = @(
     'src\NowNext.App\Package.appxmanifest',
     'src\NowNext.App\Persistence\Migrations\0001_initial_today_plan.sql',
     'src\NowNext.App\Persistence\Migrations\0002_current_focus_session_checkpoint.sql',
+    'src\NowNext.App\Persistence\Migrations\0003_context_capsules_and_break_recovery.sql',
+    'src\NowNext.App\Persistence\BreakSettings.cs',
     'src\NowNext.App\Persistence\TodayPlanStorageException.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.Sessions.cs',
+    'src\NowNext.App\Persistence\TodayPlanStore.Context.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.cs',
     'src\NowNext.App\app.manifest',
     'src\NowNext.App\packages.lock.json',
@@ -119,6 +124,8 @@ $requiredFiles = @(
     'src\NowNext.Core\Domain\TimingMode.cs',
     'src\NowNext.Core\Domain\TodayPlan.cs',
     'src\NowNext.Core\Sessions\FocusSession.cs',
+    'src\NowNext.Core\Sessions\BreakPrompt.cs',
+    'src\NowNext.Core\Sessions\ContextCapsule.cs',
     'src\NowNext.Core\Sessions\FocusSessionMachine.cs',
     'src\NowNext.Core\Sessions\SessionCheckpoint.cs',
     'src\NowNext.Core\Sessions\SessionCommands.cs',
@@ -131,13 +138,16 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\NowNext.Core.Tests.csproj',
     'tests\NowNext.Core.Tests\Persistence\MigrationTests.cs',
     'tests\NowNext.Core.Tests\Persistence\CurrentSessionStoreTests.cs',
+    'tests\NowNext.Core.Tests\Persistence\ContextAndBreakStoreTests.cs',
     'tests\NowNext.Core.Tests\Persistence\TodayPlanStoreTests.cs',
     'tests\NowNext.Core.Tests\Presentation\FocusControlPolicyTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\BreakViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\FocusViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\TaskEditorInputTests.cs',
     'tests\NowNext.Core.Tests\Presentation\TimerDisplayFormatterTests.cs',
     'tests\NowNext.Core.Tests\Runtime\FocusSessionRuntimeTests.cs',
     'tests\NowNext.Core.Tests\Sessions\FocusSessionMachineTests.cs',
+    'tests\NowNext.Core.Tests\Sessions\ContextCapsuleTests.cs',
     'tests\NowNext.Core.Tests\Sessions\SessionRecoveryTests.cs',
     'tests\NowNext.Core.Tests\Sessions\SessionTestClock.cs',
     'tests\NowNext.Core.Tests\Sessions\SessionTransitionMatrixTests.cs',
@@ -416,21 +426,22 @@ if ($sqlitePackageOwners.Count -ne 1 -or
 
 $expectedMigrations = @(
     '0001_initial_today_plan.sql',
-    '0002_current_focus_session_checkpoint.sql'
+    '0002_current_focus_session_checkpoint.sql',
+    '0003_context_capsules_and_break_recovery.sql'
 )
 $migrationFiles = @(Get-ChildItem -LiteralPath (
         Join-Path $repositoryRoot 'src\NowNext.App\Persistence\Migrations') -File -Filter '*.sql' |
     ForEach-Object { $_.Name } |
     Sort-Object)
 foreach ($difference in @(Compare-Object $expectedMigrations $migrationFiles)) {
-    Add-ValidationError "Prompt 4 migration mismatch: $($difference.InputObject)"
+    Add-ValidationError "Current migration mismatch: $($difference.InputObject)"
 }
 
 $documentationRequirements = @{
     'AGENTS.md' = 'current vertical slice'
     'ARCHITECTURE.md' = 'foreground `DispatcherQueueTimer`'
     'SCOPE.md' = '## Current vertical-slice boundary'
-    'docs\testing\README.md' = 'Prompt 5 manual test script'
+    'docs\testing\README.md' = 'Prompt 6 manual test script'
     'docs\sqlite-schema.md' = 'current_session_checkpoint'
     'docs\timer-invariants.md' = 'RecoveryRequired'
 }

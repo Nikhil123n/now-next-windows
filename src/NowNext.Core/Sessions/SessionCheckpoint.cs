@@ -23,7 +23,9 @@ public sealed record SessionCheckpoint
         DateTimeOffset? completedAtUtc = null,
         DateTimeOffset? parkedAtUtc = null,
         DateTimeOffset? dayClosedAtUtc = null,
-        string? parkedNextPhysicalAction = null)
+        string? parkedNextPhysicalAction = null,
+        DateTimeOffset? abandonedAtUtc = null,
+        BreakPlan? breakPlan = null)
     {
         ValidateIdentityAndDurations(
             id,
@@ -45,7 +47,10 @@ public sealed record SessionCheckpoint
             completedAtUtc,
             parkedAtUtc,
             dayClosedAtUtc,
-            parkedNextPhysicalAction);
+            parkedNextPhysicalAction,
+            abandonedAtUtc,
+            breakPlan);
+        ValidateBreakDuration(state, breakDuration, breakPlan);
 
         Id = id;
         TaskId = taskId;
@@ -66,6 +71,8 @@ public sealed record SessionCheckpoint
         ParkedAtUtc = parkedAtUtc?.ToUniversalTime();
         DayClosedAtUtc = dayClosedAtUtc?.ToUniversalTime();
         ParkedNextPhysicalAction = parkedAction;
+        AbandonedAtUtc = abandonedAtUtc?.ToUniversalTime();
+        BreakPlan = breakPlan;
     }
 
     public SessionId Id { get; }
@@ -105,6 +112,10 @@ public sealed record SessionCheckpoint
     public DateTimeOffset? DayClosedAtUtc { get; }
 
     public string? ParkedNextPhysicalAction { get; }
+
+    public DateTimeOffset? AbandonedAtUtc { get; }
+
+    public BreakPlan? BreakPlan { get; }
 
     private static void ValidateIdentityAndDurations(
         SessionId id,
@@ -183,42 +194,64 @@ public sealed record SessionCheckpoint
         DateTimeOffset? completedAtUtc,
         DateTimeOffset? parkedAtUtc,
         DateTimeOffset? dayClosedAtUtc,
-        string? parkedNextPhysicalAction)
+        string? parkedNextPhysicalAction,
+        DateTimeOffset? abandonedAtUtc,
+        BreakPlan? breakPlan)
     {
         bool validShape = state switch
         {
             SessionCheckpointState.Ready =>
                 resumePhase is null && boundary is null && recoveryPhase is null
                 && priorOutcome is null && completedAtUtc is null && parkedAtUtc is null
-                && dayClosedAtUtc is null && parkedNextPhysicalAction is null,
+                && dayClosedAtUtc is null && parkedNextPhysicalAction is null
+                && abandonedAtUtc is null && breakPlan is null,
             SessionCheckpointState.Paused =>
                 resumePhase is ActiveSessionPhase.Focusing or ActiveSessionPhase.Overtime
                 && boundary is null && recoveryPhase is null && priorOutcome is null
                 && completedAtUtc is null && parkedAtUtc is null && dayClosedAtUtc is null
-                && parkedNextPhysicalAction is null,
+                && parkedNextPhysicalAction is null && abandonedAtUtc is null
+                && breakPlan is null,
             SessionCheckpointState.LimitReached =>
                 resumePhase is null && boundary is not null && recoveryPhase is null
                 && priorOutcome is null && completedAtUtc is null && parkedAtUtc is null
-                && dayClosedAtUtc is null && parkedNextPhysicalAction is null,
+                && dayClosedAtUtc is null && parkedNextPhysicalAction is null
+                && abandonedAtUtc is null && breakPlan is null,
             SessionCheckpointState.Completed =>
                 resumePhase is null && boundary is null && recoveryPhase is null
                 && priorOutcome is null && completedAtUtc is not null && parkedAtUtc is null
-                && dayClosedAtUtc is null && parkedNextPhysicalAction is null,
+                && dayClosedAtUtc is null && parkedNextPhysicalAction is null
+                && abandonedAtUtc is null && breakPlan is null,
             SessionCheckpointState.Parked =>
                 resumePhase is null && boundary is null && recoveryPhase is null
                 && priorOutcome is null && completedAtUtc is null && parkedAtUtc is not null
-                && dayClosedAtUtc is null && !string.IsNullOrWhiteSpace(parkedNextPhysicalAction),
-            SessionCheckpointState.RecoveryRequired =>
-                resumePhase is null && boundary is null && recoveryPhase is not null
-                && dayClosedAtUtc is null && ValidateRecoveryOutcome(
-                    recoveryPhase.Value,
+                && dayClosedAtUtc is null && !string.IsNullOrWhiteSpace(parkedNextPhysicalAction)
+                && abandonedAtUtc is null && breakPlan is null,
+            SessionCheckpointState.BreakCompleted =>
+                resumePhase is null && boundary is null && recoveryPhase is null
+                && dayClosedAtUtc is null && abandonedAtUtc is null && breakPlan is not null
+                && ValidateOutcome(
                     priorOutcome,
                     completedAtUtc,
                     parkedAtUtc,
                     parkedNextPhysicalAction),
+            SessionCheckpointState.Abandoned =>
+                resumePhase is null && boundary is null && recoveryPhase is null
+                && priorOutcome is null && completedAtUtc is null && parkedAtUtc is null
+                && dayClosedAtUtc is null && parkedNextPhysicalAction is null
+                && abandonedAtUtc is not null && breakPlan is null,
+            SessionCheckpointState.RecoveryRequired =>
+                resumePhase is null && boundary is null && recoveryPhase is not null
+                && dayClosedAtUtc is null && abandonedAtUtc is null && ValidateRecoveryOutcome(
+                    recoveryPhase.Value,
+                    priorOutcome,
+                    completedAtUtc,
+                    parkedAtUtc,
+                    parkedNextPhysicalAction,
+                    breakPlan),
             SessionCheckpointState.DayClosed =>
                 resumePhase is null && boundary is null && recoveryPhase is null
-                && dayClosedAtUtc is not null && ValidateDayClosedOutcome(
+                && dayClosedAtUtc is not null && abandonedAtUtc is null && breakPlan is null
+                && ValidateDayClosedOutcome(
                     priorOutcome,
                     completedAtUtc,
                     parkedAtUtc,
@@ -241,15 +274,21 @@ public sealed record SessionCheckpoint
         SessionOutcome? priorOutcome,
         DateTimeOffset? completedAtUtc,
         DateTimeOffset? parkedAtUtc,
-        string? parkedNextPhysicalAction)
+        string? parkedNextPhysicalAction,
+        BreakPlan? breakPlan)
     {
         if (recoveryPhase != ActiveSessionPhase.Break)
         {
             return priorOutcome is null && completedAtUtc is null && parkedAtUtc is null
-                && parkedNextPhysicalAction is null;
+                && parkedNextPhysicalAction is null && breakPlan is null;
         }
 
-        return ValidateOutcome(priorOutcome, completedAtUtc, parkedAtUtc, parkedNextPhysicalAction);
+        return breakPlan is not null
+            && ValidateOutcome(
+                priorOutcome,
+                completedAtUtc,
+                parkedAtUtc,
+                parkedNextPhysicalAction);
     }
 
     private static bool ValidateDayClosedOutcome(
@@ -279,5 +318,31 @@ public sealed record SessionCheckpoint
                 && !string.IsNullOrWhiteSpace(parkedNextPhysicalAction),
             _ => false,
         };
+    }
+
+    private static void ValidateBreakDuration(
+        SessionCheckpointState state,
+        TimeSpan breakDuration,
+        BreakPlan? breakPlan)
+    {
+        if (breakPlan is null)
+        {
+            return;
+        }
+
+        if (breakDuration > breakPlan.Duration)
+        {
+            throw new ArgumentException(
+                "Stored Break duration must not exceed its approved limit.",
+                nameof(breakDuration));
+        }
+
+        if (state == SessionCheckpointState.BreakCompleted
+            && breakDuration != breakPlan.Duration)
+        {
+            throw new ArgumentException(
+                "A completed Break must equal its approved limit.",
+                nameof(breakDuration));
+        }
     }
 }

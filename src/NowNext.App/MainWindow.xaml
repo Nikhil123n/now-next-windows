@@ -226,7 +226,7 @@
                         <Button
                             x:Name="FinishButton"
                             Click="OnFinishClick"
-                            Content="Finish"
+                            Content="Done"
                             MinHeight="44" />
                         <Button
                             x:Name="ParkButton"
@@ -333,7 +333,7 @@
                             MinHeight="44" />
                         <Button
                             Click="OnFinishClick"
-                            Content="Finish"
+                            Content="Done"
                             MinHeight="44" />
                         <Button
                             Click="OnParkClick"
@@ -344,6 +344,131 @@
                         x:Name="RecoveryError"
                         AutomationProperties.LiveSetting="Assertive"
                         TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid
+            x:Name="BreakScreen"
+            AutomationProperties.Name="Break session"
+            IsTabStop="True"
+            KeyDown="OnBreakKeyDown"
+            Visibility="Collapsed">
+            <TextBlock
+                Margin="32,48,32,0"
+                AutomationProperties.HeadingLevel="Level1"
+                FontSize="24"
+                FontWeight="SemiBold"
+                HorizontalAlignment="Center"
+                Text="Break"
+                VerticalAlignment="Top" />
+
+            <StackPanel
+                HorizontalAlignment="Center"
+                MaxWidth="760"
+                Spacing="24"
+                VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="BreakPromptText"
+                    AutomationProperties.LiveSetting="Polite"
+                    FontSize="30"
+                    FontWeight="SemiBold"
+                    HorizontalAlignment="Center"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    x:Name="BreakTimerText"
+                    AutomationProperties.Name="Break timer"
+                    FontFamily="Consolas"
+                    FontSize="88"
+                    HorizontalAlignment="Center"
+                    Text="00:00" />
+                <StackPanel
+                    x:Name="BreakReturnContext"
+                    AutomationProperties.LiveSetting="Polite"
+                    HorizontalAlignment="Center"
+                    Spacing="8"
+                    Visibility="Collapsed">
+                    <TextBlock
+                        FontSize="20"
+                        FontWeight="SemiBold"
+                        HorizontalAlignment="Center"
+                        Text="Return when you are ready" />
+                    <TextBlock
+                        x:Name="BreakReturningTaskText"
+                        FontSize="22"
+                        HorizontalAlignment="Center"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="BreakReturningActionText"
+                        HorizontalAlignment="Center"
+                        Opacity="0.78"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel
+                Margin="24"
+                HorizontalAlignment="Center"
+                Spacing="8"
+                VerticalAlignment="Bottom">
+                <Button
+                    x:Name="EndBreakButton"
+                    AutomationProperties.Name="End Break and confirm return"
+                    Click="OnEndBreakClick"
+                    Content="End Break"
+                    HorizontalAlignment="Center"
+                    MinHeight="44"
+                    MinWidth="128" />
+                <TextBlock
+                    x:Name="BreakError"
+                    AutomationProperties.LiveSetting="Assertive"
+                    HorizontalAlignment="Center"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Border
+                x:Name="BreakRecoveryPanel"
+                Margin="24"
+                Padding="20"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="8"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Visibility="Collapsed">
+                <StackPanel
+                    MaxWidth="760"
+                    Spacing="12">
+                    <TextBlock
+                        FontSize="20"
+                        FontWeight="SemiBold"
+                        Text="Break was interrupted" />
+                    <TextBlock
+                        Text="Saved Break time is intact. Continue without the time away, or explicitly include a known amount."
+                        TextWrapping="Wrap" />
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <Button
+                            Click="OnBreakResumeWithoutAwayClick"
+                            Content="Continue — exclude time away"
+                            MinHeight="44" />
+                        <NumberBox
+                            x:Name="BreakIncludedAwayMinutes"
+                            AutomationProperties.Name="Minutes away to include in Break"
+                            Header="Include minutes"
+                            Minimum="0"
+                            SpinButtonPlacementMode="Compact"
+                            Value="0"
+                            Width="150" />
+                        <Button
+                            Click="OnBreakResumeIncludingAwayClick"
+                            Content="Include and continue"
+                            MinHeight="44" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>

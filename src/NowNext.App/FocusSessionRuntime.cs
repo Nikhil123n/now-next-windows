@@ -62,6 +62,7 @@ public sealed class FocusSessionRuntime : IDisposable
                 && current.State is not (
                     CompletedSessionState
                     or ParkedSessionState
+                    or AbandonedSessionState
                     or DayClosedSessionState))
             {
                 throw new InvalidOperationException(
@@ -79,7 +80,7 @@ public sealed class FocusSessionRuntime : IDisposable
                 taskId,
                 timingMode,
                 plannedDuration);
-            await PersistBeforePublishingAsync(candidate, cancellationToken);
+            await PersistBeforePublishingAsync(candidate, null, cancellationToken);
             Volatile.Write(ref _current, candidate);
             return candidate;
         }
@@ -104,7 +105,10 @@ public sealed class FocusSessionRuntime : IDisposable
                 current,
                 command,
                 _timeProvider);
-            await PersistBeforePublishingAsync(transition.Session, cancellationToken);
+            await PersistBeforePublishingAsync(
+                transition.Session,
+                command as ParkSession,
+                cancellationToken);
             Volatile.Write(ref _current, transition.Session);
             return transition;
         }
@@ -139,7 +143,7 @@ public sealed class FocusSessionRuntime : IDisposable
                 current,
                 new InterruptSession(),
                 interruptionObservation);
-            await PersistBeforePublishingAsync(transition.Session, cancellationToken);
+            await PersistBeforePublishingAsync(transition.Session, null, cancellationToken);
             Volatile.Write(ref _current, transition.Session);
         }
         finally
@@ -168,12 +172,28 @@ public sealed class FocusSessionRuntime : IDisposable
 
     private async System.Threading.Tasks.Task PersistBeforePublishingAsync(
         FocusSession candidate,
+        ParkSession? parkSession,
         CancellationToken cancellationToken)
     {
         SessionCheckpoint checkpoint = FocusSessionMachine.CreateCheckpoint(
             candidate,
             _timeProvider);
-        await _store.SaveCurrentSessionAsync(checkpoint, cancellationToken);
+        if (parkSession is null)
+        {
+            await _store.SaveCurrentSessionAsync(checkpoint, cancellationToken);
+            return;
+        }
+
+        var capsule = new ContextCapsule(
+            checkpoint.TaskId,
+            checkpoint.Id,
+            parkSession.NextPhysicalAction,
+            parkSession.Note,
+            checkpoint.ParkedAtUtc!.Value);
+        await _store.SaveCurrentSessionAndContextAsync(
+            checkpoint,
+            capsule,
+            cancellationToken);
     }
 
     private sealed class CapturedTimeProvider : TimeProvider

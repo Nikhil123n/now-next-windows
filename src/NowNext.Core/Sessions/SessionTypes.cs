@@ -31,8 +31,10 @@ public enum SessionStateKind
     Overtime,
     Landing,
     Break,
+    BreakCompleted,
     Completed,
     Parked,
+    Abandoned,
     RecoveryRequired,
     DayClosed,
 }
@@ -64,6 +66,8 @@ public enum SessionCheckpointState
     LimitReached,
     Completed,
     Parked,
+    BreakCompleted,
+    Abandoned,
     RecoveryRequired,
     DayClosed,
 }
@@ -73,6 +77,7 @@ public enum SessionSignal
     None,
     FocusLimitReached,
     LandingLimitReached,
+    BreakLimitReached,
 }
 
 public abstract record SessionState
@@ -132,6 +137,7 @@ public sealed record BreakSessionState : SessionState
 {
     public BreakSessionState(
         long segmentStartedTimestamp,
+        BreakPlan plan,
         SessionOutcome priorOutcome,
         DateTimeOffset outcomeAtUtc,
         string? parkedNextPhysicalAction)
@@ -142,6 +148,7 @@ public sealed record BreakSessionState : SessionState
         }
 
         SegmentStartedTimestamp = segmentStartedTimestamp;
+        Plan = plan ?? throw new ArgumentNullException(nameof(plan));
         PriorOutcome = priorOutcome;
         OutcomeAtUtc = outcomeAtUtc.ToUniversalTime();
         ParkedNextPhysicalAction = ValidateParkedAction(
@@ -151,6 +158,8 @@ public sealed record BreakSessionState : SessionState
     }
 
     public long SegmentStartedTimestamp { get; }
+
+    public BreakPlan Plan { get; }
 
     public SessionOutcome PriorOutcome { get; }
 
@@ -188,6 +197,39 @@ public sealed record BreakSessionState : SessionState
     }
 }
 
+public sealed record BreakCompletedSessionState : SessionState
+{
+    public BreakCompletedSessionState(
+        BreakPlan plan,
+        SessionOutcome priorOutcome,
+        DateTimeOffset outcomeAtUtc,
+        string? parkedNextPhysicalAction)
+    {
+        if (!Enum.IsDefined(priorOutcome))
+        {
+            throw new ArgumentException("Session outcome is not defined.", nameof(priorOutcome));
+        }
+
+        Plan = plan ?? throw new ArgumentNullException(nameof(plan));
+        PriorOutcome = priorOutcome;
+        OutcomeAtUtc = outcomeAtUtc.ToUniversalTime();
+        ParkedNextPhysicalAction = BreakSessionState.ValidateParkedAction(
+            priorOutcome,
+            parkedNextPhysicalAction,
+            nameof(parkedNextPhysicalAction));
+    }
+
+    public BreakPlan Plan { get; }
+
+    public SessionOutcome PriorOutcome { get; }
+
+    public DateTimeOffset OutcomeAtUtc { get; }
+
+    public string? ParkedNextPhysicalAction { get; }
+
+    public override SessionStateKind Kind => SessionStateKind.BreakCompleted;
+}
+
 public sealed record CompletedSessionState(DateTimeOffset CompletedAtUtc) : SessionState
 {
     public DateTimeOffset CompletedAtUtc { get; } = CompletedAtUtc.ToUniversalTime();
@@ -214,6 +256,13 @@ public sealed record ParkedSessionState : SessionState
     public override SessionStateKind Kind => SessionStateKind.Parked;
 }
 
+public sealed record AbandonedSessionState(DateTimeOffset AbandonedAtUtc) : SessionState
+{
+    public DateTimeOffset AbandonedAtUtc { get; } = AbandonedAtUtc.ToUniversalTime();
+
+    public override SessionStateKind Kind => SessionStateKind.Abandoned;
+}
+
 public sealed record RecoveryRequiredSessionState : SessionState
 {
     public RecoveryRequiredSessionState(
@@ -222,7 +271,8 @@ public sealed record RecoveryRequiredSessionState : SessionState
         DateTimeOffset detectedAtUtc,
         SessionOutcome? priorOutcome = null,
         DateTimeOffset? outcomeAtUtc = null,
-        string? parkedNextPhysicalAction = null)
+        string? parkedNextPhysicalAction = null,
+        BreakPlan? breakPlan = null)
     {
         if (!Enum.IsDefined(interruptedPhase))
         {
@@ -231,10 +281,10 @@ public sealed record RecoveryRequiredSessionState : SessionState
 
         if (interruptedPhase == ActiveSessionPhase.Break)
         {
-            if (priorOutcome is null || outcomeAtUtc is null)
+            if (priorOutcome is null || outcomeAtUtc is null || breakPlan is null)
             {
                 throw new ArgumentException(
-                    "Break recovery requires its prior outcome and timestamp.",
+                    "Break recovery requires its plan, prior outcome, and timestamp.",
                     nameof(priorOutcome));
             }
 
@@ -243,7 +293,10 @@ public sealed record RecoveryRequiredSessionState : SessionState
                 parkedNextPhysicalAction,
                 nameof(parkedNextPhysicalAction));
         }
-        else if (priorOutcome is not null || outcomeAtUtc is not null || parkedNextPhysicalAction is not null)
+        else if (priorOutcome is not null
+            || outcomeAtUtc is not null
+            || parkedNextPhysicalAction is not null
+            || breakPlan is not null)
         {
             throw new ArgumentException(
                 "Only Break recovery can contain a prior outcome.",
@@ -255,6 +308,7 @@ public sealed record RecoveryRequiredSessionState : SessionState
         DetectedAtUtc = detectedAtUtc.ToUniversalTime();
         PriorOutcome = priorOutcome;
         OutcomeAtUtc = outcomeAtUtc?.ToUniversalTime();
+        BreakPlan = breakPlan;
     }
 
     public ActiveSessionPhase InterruptedPhase { get; }
@@ -268,6 +322,8 @@ public sealed record RecoveryRequiredSessionState : SessionState
     public DateTimeOffset? OutcomeAtUtc { get; }
 
     public string? ParkedNextPhysicalAction { get; }
+
+    public BreakPlan? BreakPlan { get; }
 
     public override SessionStateKind Kind => SessionStateKind.RecoveryRequired;
 }

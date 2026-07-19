@@ -30,16 +30,20 @@ approved subject to Windows Reduced Motion accessibility behavior.
   — completed implementation scope and verification record.
 - [Prompt 5 vertical-slice plan](plans/prompt-5-today-focus-vertical-slice.md) — Today
   planning and the minimal authoritative Focus experience.
+- [Prompt 6 Context and Break plan](plans/prompt-6-context-break-journey.md) — durable
+  parking context, bounded Breaks, and confirmed return.
 - [Timer invariants](timer-invariants.md) — authoritative elapsed-time, transition,
   boundary, and recovery rules.
 - [SQLite schema](sqlite-schema.md) — current migration and retention contract.
 - [Testing strategy](testing/README.md) — verification layers and required scenarios.
 - [Prompt 5 manual test script](testing/prompt-5-manual-test-script.md) — packaged WinUI,
   input, recovery, and accessibility checks that are not reliable in the CLI test host.
+- [Prompt 6 manual test script](testing/prompt-6-manual-test-script.md) — Landing, Park,
+  Context Capsule, Break, restart, and return-confirmation checks.
 
 ## Current phase
 
-The current vertical slice connects the existing Today model, App-owned SQLite storage,
-and authoritative session engine to plain Today and Focus screens. Schedule repair,
-Break UI, session history, Context Capsules, visual polish, and deferred features remain
-unimplemented.
+The current vertical slice connects the Today model, App-owned SQLite storage, and
+authoritative session engine to plain Today, Focus, and Break screens. It durably retains
+parking context and never starts returned work without confirmation. Schedule repair,
+general session history, visual polish, and deferred features remain unimplemented.

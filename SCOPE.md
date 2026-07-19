@@ -44,11 +44,13 @@ implementation begins. Do not infer approval from technical convenience.
 This phase connects the existing Today model, App-owned SQLite store, and authoritative
 focus-session engine to a visually plain WinUI flow. It includes today's ordered task
 list and approved editor fields, explicit Fixed/Flexible status, Start, both timer modes,
-transient focus controls, five-minute Landing, extension, completion, parking, and
-explicit restart/suspension recovery.
+transient focus controls, five-minute Landing, extension, completion, parking with a
+durable Context Capsule, explicit abandonment, bounded configurable Breaks, confirmed
+return, and explicit restart/suspension recovery.
 
 The UI is not a general task manager and the DispatcherQueue refresh only requests Core
 projections and durability checkpoints; it never owns elapsed time. This phase does not
-add Break UI, a background service, adaptive or additional focus modes, schedule repair,
-session history, Context Capsule notes, recurrence, categories, dependencies, rich notes,
-AI, calendar integration, multi-day backlog, themes, custom icons, or visual polish.
+add a background service, wellness recommendation engine, independent health clocks,
+exercise scoring, adaptive or additional focus modes, schedule repair, general session
+history, voice notes, attachments, recurrence, categories, dependencies, rich notes, AI,
+calendar integration, multi-day backlog, themes, custom icons, or visual polish.

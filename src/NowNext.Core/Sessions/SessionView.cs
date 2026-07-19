@@ -17,6 +17,6 @@ public sealed record OvertimeTimerReading(TimeSpan Overtime) : TimerReading;
 
 public sealed record LandingTimerReading(TimeSpan Elapsed, TimeSpan Limit) : TimerReading;
 
-public sealed record BreakTimerReading(TimeSpan Elapsed) : TimerReading;
+public sealed record BreakTimerReading(TimeSpan Elapsed, TimeSpan Limit) : TimerReading;
 
 public sealed record SessionView(SessionStateKind State, TimerReading Timer);

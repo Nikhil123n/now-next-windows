@@ -217,9 +217,11 @@ public sealed class SessionRecoveryTests
 
         Assert.AreEqual(TimeSpan.FromMinutes(2), resumed.CommittedActiveDuration);
         Assert.AreEqual(TimeSpan.FromMinutes(5), resumed.BreakDuration);
-        BreakSessionState state = Assert.IsInstanceOfType<BreakSessionState>(resumed.State);
+        BreakCompletedSessionState state =
+            Assert.IsInstanceOfType<BreakCompletedSessionState>(resumed.State);
         Assert.AreEqual(SessionOutcome.Parked, state.PriorOutcome);
         Assert.AreEqual("Continue from paragraph three", state.ParkedNextPhysicalAction);
+        Assert.AreEqual(BreakPromptKind.DistantGaze, state.Plan.Prompt.Kind);
     }
 
     [TestMethod]
@@ -313,6 +315,31 @@ public sealed class SessionRecoveryTests
                 DateTimeOffset.UtcNow));
 
         Assert.Contains("shorter", exception.Message);
+    }
+
+    [TestMethod]
+    public void CheckpointRejectsBreakDurationBeyondItsLimit()
+    {
+        ArgumentException exception = Assert.ThrowsExactly<ArgumentException>(
+            () => new SessionCheckpoint(
+                new SessionId(Guid.NewGuid()),
+                new NowNext.Core.Domain.TaskId(Guid.NewGuid()),
+                NowNext.Core.Domain.TimingMode.CountUp,
+                TimeSpan.FromMinutes(25),
+                TimeSpan.FromMinutes(25),
+                SessionCheckpointState.RecoveryRequired,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                TimeSpan.FromMinutes(6),
+                DateTimeOffset.UtcNow,
+                recoveryPhase: ActiveSessionPhase.Break,
+                priorOutcome: SessionOutcome.Completed,
+                completedAtUtc: DateTimeOffset.UtcNow,
+                breakPlan: new BreakPlan(
+                    TimeSpan.FromMinutes(5),
+                    new BreakPrompt(BreakPromptKind.Walk))));
+
+        Assert.Contains("Break duration", exception.Message);
     }
 
     private static FocusSession ReachLanding(SessionTestClock clock)

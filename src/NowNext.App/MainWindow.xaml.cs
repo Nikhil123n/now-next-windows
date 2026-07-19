@@ -33,6 +33,8 @@ public sealed partial class MainWindow : Window
     private AppWindow? _appWindow;
     private DomainTask? _editingTask;
     private DomainTask? _focusedTask;
+    private DomainTask? _returningTask;
+    private ContextCapsule? _returningContext;
     private bool _commandInProgress;
     private bool _colonVisible = true;
     private bool _allowClose;
@@ -80,6 +82,10 @@ public sealed partial class MainWindow : Window
             FocusControlError.Text = statusMessage;
             RevealControls();
         }
+        else if (BreakScreen.Visibility == Visibility.Visible)
+        {
+            BreakError.Text = statusMessage;
+        }
     }
 
     private async void OnRootLoaded(object sender, RoutedEventArgs args)
@@ -98,7 +104,7 @@ public sealed partial class MainWindow : Window
         {
             await ReloadTodayAsync();
             FocusSession? current = _sessionRuntime.Current;
-            if (current is not null && !IsTerminal(current.State))
+            if (current is not null && current.State is not (AbandonedSessionState or DayClosedSessionState))
             {
                 _focusedTask = TodayItems
                     .Select(item => item.Task)
@@ -111,10 +117,27 @@ public sealed partial class MainWindow : Window
 
                 if (current.State is ReadySessionState)
                 {
-                    await _sessionRuntime.ExecuteAsync(new StartSession());
+                    await ConfirmAndStartTaskAsync(_focusedTask, requireConfirmation: true);
+                    return;
                 }
 
-                ShowFocusScreen();
+                if (current.State is CompletedSessionState or ParkedSessionState)
+                {
+                    if (current.BreakDuration == TimeSpan.Zero)
+                    {
+                        await PrepareReturningContextAsync(GetOutcome(current.State));
+                        await ShowBreakOfferAsync();
+                    }
+                }
+                else if (IsBreakState(current.State))
+                {
+                    await PrepareReturningContextAsync(GetOutcome(current.State));
+                    ShowBreakScreen();
+                }
+                else
+                {
+                    ShowFocusScreen();
+                }
             }
         }
         catch (Exception exception) when (IsExpectedFailure(exception))
@@ -356,15 +379,68 @@ public sealed partial class MainWindow : Window
 
     private async void OnStartTaskClick(object sender, RoutedEventArgs args)
     {
-        if (_sessionRuntime is null || !TryGetItem(sender, out TodayTaskItem item))
+        if (!TryGetItem(sender, out TodayTaskItem item))
+        {
+            return;
+        }
+
+        await ConfirmAndStartTaskAsync(item.Task, requireConfirmation: false);
+    }
+
+    private async System.Threading.Tasks.Task ConfirmAndStartTaskAsync(
+        DomainTask task,
+        bool requireConfirmation)
+    {
+        if (_sessionRuntime is null || _store is null)
         {
             return;
         }
 
         try
         {
+            ContextCapsule? capsule = await _store.LoadLatestContextCapsuleAsync(task.Id);
+            if (capsule is not null || requireConfirmation)
+            {
+                var content = new StackPanel { Spacing = 8 };
+                content.Children.Add(new TextBlock
+                {
+                    FontSize = 20,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Text = task.ShortFocusLabel,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                content.Children.Add(new TextBlock
+                {
+                    Text = capsule?.NextPhysicalAction ?? task.FirstPhysicalAction,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                if (capsule?.Note is not null)
+                {
+                    content.Children.Add(new TextBlock
+                    {
+                        Opacity = 0.72,
+                        Text = capsule.Note,
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+
+                var dialog = new ContentDialog
+                {
+                    Title = capsule is null ? "Start this focus session?" : "Saved next action",
+                    Content = content,
+                    PrimaryButtonText = "Start focus",
+                    CloseButtonText = "Not yet",
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = RootGrid.XamlRoot,
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                {
+                    return;
+                }
+            }
+
             FocusSession? current = _sessionRuntime.Current;
-            if (current?.State is ReadySessionState && current.TaskId == item.Task.Id)
+            if (current?.State is ReadySessionState && current.TaskId == task.Id)
             {
                 await _sessionRuntime.ExecuteAsync(new StartSession());
             }
@@ -372,13 +448,13 @@ public sealed partial class MainWindow : Window
             {
                 await _sessionRuntime.CreateAsync(
                     new SessionId(Guid.NewGuid()),
-                    item.Task.Id,
-                    item.Task.TimingMode,
-                    item.Task.PlannedDuration);
+                    task.Id,
+                    task.TimingMode,
+                    task.PlannedDuration);
                 await _sessionRuntime.ExecuteAsync(new StartSession());
             }
 
-            _focusedTask = item.Task;
+            _focusedTask = task;
             ShowFocusScreen();
         }
         catch (Exception exception) when (IsExpectedFailure(exception))
@@ -395,6 +471,7 @@ public sealed partial class MainWindow : Window
         }
 
         TodayScreen.Visibility = Visibility.Collapsed;
+        BreakScreen.Visibility = Visibility.Collapsed;
         FocusScreen.Visibility = Visibility.Visible;
         FocusLabelText.Text = _focusedTask.ShortFocusLabel;
         FocusControls.Visibility = Visibility.Collapsed;
@@ -418,10 +495,33 @@ public sealed partial class MainWindow : Window
         FocusControls.Visibility = Visibility.Collapsed;
         RecoveryPanel.Visibility = Visibility.Collapsed;
         FocusScreen.Visibility = Visibility.Collapsed;
+        BreakRecoveryPanel.Visibility = Visibility.Collapsed;
+        BreakScreen.Visibility = Visibility.Collapsed;
         TodayScreen.Visibility = Visibility.Visible;
         _appWindow?.SetPresenter(AppWindowPresenterKind.Default);
         await ReloadTodayAsync();
         _ = TodayTaskList.Focus(FocusState.Programmatic);
+    }
+
+    private void ShowBreakScreen()
+    {
+        if (_sessionRuntime?.Current is null || _focusedTask is null)
+        {
+            return;
+        }
+
+        TodayScreen.Visibility = Visibility.Collapsed;
+        FocusScreen.Visibility = Visibility.Collapsed;
+        BreakScreen.Visibility = Visibility.Visible;
+        FocusControls.Visibility = Visibility.Collapsed;
+        RecoveryPanel.Visibility = Visibility.Collapsed;
+        BreakError.Text = string.Empty;
+        _colonTimer.Stop();
+        _ticksSinceCheckpoint = 0;
+        UpdateBreakProjection();
+        _focusProjectionTimer.Start();
+        _appWindow?.SetPresenter(AppWindowPresenterKind.FullScreen);
+        _ = BreakScreen.Focus(FocusState.Programmatic);
     }
 
     private async void OnFocusProjectionTimerTick(DispatcherQueueTimer sender, object args)
@@ -434,7 +534,15 @@ public sealed partial class MainWindow : Window
         try
         {
             SessionView projected = _sessionRuntime.GetCurrentView();
-            UpdateFocusProjection(projected);
+            if (BreakScreen.Visibility == Visibility.Visible)
+            {
+                UpdateBreakProjection(projected);
+            }
+            else
+            {
+                UpdateFocusProjection(projected);
+            }
+
             FocusSession? current = _sessionRuntime.Current;
             if (current is null)
             {
@@ -443,7 +551,8 @@ public sealed partial class MainWindow : Window
             bool running = current.State is
                 FocusingSessionState
                 or OvertimeSessionState
-                or LandingSessionState;
+                or LandingSessionState
+                or BreakSessionState;
             bool crossedBoundary = projected.State != current.State.Kind;
             if (running && (crossedBoundary || ++_ticksSinceCheckpoint >= CheckpointIntervalTicks))
             {
@@ -453,8 +562,15 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception) when (IsExpectedFailure(exception))
         {
-            FocusControlError.Text = "The focus checkpoint could not be saved.";
-            RevealControls();
+            if (BreakScreen.Visibility == Visibility.Visible)
+            {
+                BreakError.Text = "The Break checkpoint could not be saved.";
+            }
+            else
+            {
+                FocusControlError.Text = "The focus checkpoint could not be saved.";
+                RevealControls();
+            }
         }
     }
 
@@ -505,6 +621,63 @@ public sealed partial class MainWindow : Window
             FocusControls.Visibility = Visibility.Collapsed;
             _controlsInactivityTimer.Stop();
         }
+    }
+
+    private void UpdateBreakProjection()
+    {
+        if (_sessionRuntime?.Current is null)
+        {
+            return;
+        }
+
+        UpdateBreakProjection(_sessionRuntime.GetCurrentView());
+    }
+
+    private void UpdateBreakProjection(SessionView view)
+    {
+        if (view.Timer is not BreakTimerReading timer
+            || _sessionRuntime?.Current is not { } current)
+        {
+            return;
+        }
+
+        BreakPlan plan = GetBreakPlan(current.State);
+        BreakPromptText.Text = plan.Prompt.Text;
+        TimerDisplayParts display = TimerDisplayFormatter.Format(view);
+        BreakTimerText.Text = display.ShowHours
+            ? $"{display.Hours}:{display.Minutes}:{display.Seconds}"
+            : $"{display.Minutes}:{display.Seconds}";
+        AutomationProperties.SetName(BreakTimerText, display.AccessibleText);
+
+        TimeSpan returnLead = plan.Duration < TimeSpan.FromMinutes(1)
+            ? plan.Duration
+            : TimeSpan.FromMinutes(1);
+        bool showReturn = timer.Limit - timer.Elapsed <= returnLead;
+        BreakReturnContext.Visibility = showReturn
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (showReturn)
+        {
+            BreakReturningTaskText.Text = _returningTask?.ShortFocusLabel
+                ?? "Return to Today";
+            BreakReturningActionText.Text = _returningContext?.NextPhysicalAction
+                ?? _returningTask?.FirstPhysicalAction
+                ?? "Choose the next task after confirming your return.";
+        }
+
+        bool requiresRecovery = current.State is RecoveryRequiredSessionState
+        {
+            InterruptedPhase: ActiveSessionPhase.Break,
+        };
+        BreakRecoveryPanel.Visibility = requiresRecovery
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        EndBreakButton.Visibility = requiresRecovery
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        EndBreakButton.Content = view.State == SessionStateKind.BreakCompleted
+            ? "Confirm return"
+            : "End Break";
     }
 
     private void OnColonTimerTick(DispatcherQueueTimer sender, object args)
@@ -560,7 +733,7 @@ public sealed partial class MainWindow : Window
                 args.Handled = true;
                 break;
             case VirtualKey.F:
-                await ExecuteCommandAsync(new CompleteSession());
+                await CompleteAsync();
                 args.Handled = true;
                 break;
             case VirtualKey.P:
@@ -630,7 +803,18 @@ public sealed partial class MainWindow : Window
 
     private async void OnFinishClick(object sender, RoutedEventArgs args)
     {
-        await ExecuteCommandAsync(new CompleteSession());
+        await CompleteAsync();
+    }
+
+    private async System.Threading.Tasks.Task CompleteAsync()
+    {
+        if (await ExecuteCommandAsync(
+                new CompleteSession(),
+                returnToTodayOnOutcome: false))
+        {
+            await PrepareReturningContextAsync(SessionOutcome.Completed);
+            await ShowBreakOfferAsync();
+        }
     }
 
     private async void OnParkClick(object sender, RoutedEventArgs args)
@@ -645,29 +829,227 @@ public sealed partial class MainWindow : Window
             Header = "Next physical action",
             Text = _focusedTask?.NextPhysicalAction ?? string.Empty,
         };
+        var noteInput = new TextBox
+        {
+            Header = "Short note (optional)",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var validation = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+        };
         AutomationProperties.SetName(nextActionInput, "Next physical action required to park");
+        AutomationProperties.SetName(noteInput, "Optional Context Capsule note");
+        var content = new StackPanel { MinWidth = 440, Spacing = 12 };
+        content.Children.Add(validation);
+        content.Children.Add(nextActionInput);
+        content.Children.Add(noteInput);
         var dialog = new ContentDialog
         {
             Title = "Park this task",
-            Content = nextActionInput,
+            Content = content,
             PrimaryButtonText = "Park",
+            SecondaryButtonText = "Abandon task",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = RootGrid.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+
+        while (true)
+        {
+            ContentDialogResult result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.None)
+            {
+                return;
+            }
+
+            if (result == ContentDialogResult.Secondary)
+            {
+                await AbandonAsync();
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(nextActionInput.Text))
+            {
+                break;
+            }
+
+            validation.Text = "Parking requires a next physical action. Choose Abandon task only if this task will not be resumed.";
+        }
+
+        if (await ExecuteCommandAsync(
+                new ParkSession(nextActionInput.Text, noteInput.Text),
+                returnToTodayOnOutcome: false))
+        {
+            await PrepareReturningContextAsync(SessionOutcome.Parked);
+            await ShowBreakOfferAsync();
+        }
+    }
+
+    private async System.Threading.Tasks.Task AbandonAsync()
+    {
+        var confirmation = new ContentDialog
+        {
+            Title = "Abandon this task?",
+            Content = "The task will be deferred without a saved next action. This is distinct from parking it for later.",
+            PrimaryButtonText = "Abandon task",
+            CloseButtonText = "Keep working",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = RootGrid.XamlRoot,
+        };
+        if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
         {
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(nextActionInput.Text))
+        if (await ExecuteCommandAsync(
+                new AbandonSession(),
+                returnToTodayOnOutcome: false))
         {
-            FocusControlError.Text = "Parking requires a next physical action.";
-            RevealControls();
+            await ShowTodayScreenAsync();
+        }
+    }
+
+    private async System.Threading.Tasks.Task ShowBreakOfferAsync()
+    {
+        if (_store is null || _sessionRuntime?.Current is null)
+        {
             return;
         }
 
-        await ExecuteCommandAsync(new ParkSession(nextActionInput.Text));
+        try
+        {
+            BreakSettings settings = await _store.LoadBreakSettingsAsync();
+            var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            var duration = new NumberBox
+            {
+                Header = "Break duration (minutes)",
+                Minimum = 1,
+                SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+                Value = settings.DefaultBreakDuration.TotalMinutes,
+                Width = 180,
+            };
+            AutomationProperties.SetName(duration, "Default Break duration in minutes");
+            var prompt = new ComboBox
+            {
+                Header = "One Break prompt",
+                SelectedIndex = 0,
+                MinWidth = 280,
+            };
+            prompt.Items.Add("Distant gaze");
+            prompt.Items.Add("Water");
+            prompt.Items.Add("Jaw relaxation");
+            prompt.Items.Add("Shoulder release");
+            prompt.Items.Add("Stand");
+            prompt.Items.Add("Walk");
+            prompt.Items.Add("User-selected movement");
+            AutomationProperties.SetName(prompt, "Break prompt");
+            var movement = new TextBox
+            {
+                Header = "User-selected movement (used only when selected)",
+                Text = settings.UserSelectedMovement ?? string.Empty,
+            };
+            AutomationProperties.SetName(movement, "User-selected movement prompt");
+            var content = new StackPanel { MinWidth = 440, Spacing = 12 };
+            content.Children.Add(new TextBlock
+            {
+                Text = "Landing is focus time; this optional Break is separate and counts up.",
+                TextWrapping = TextWrapping.Wrap,
+            });
+            content.Children.Add(error);
+            content.Children.Add(duration);
+            content.Children.Add(prompt);
+            content.Children.Add(movement);
+            var dialog = new ContentDialog
+            {
+                Title = "Take a Break?",
+                Content = content,
+                PrimaryButtonText = "Start Break",
+                SecondaryButtonText = "Return to Today",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = RootGrid.XamlRoot,
+            };
+
+            while (true)
+            {
+                ContentDialogResult result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary)
+                {
+                    await ShowTodayScreenAsync();
+                    return;
+                }
+
+                if (!IsValidTimeSpanMinutes(duration.Value))
+                {
+                    error.Text = "Enter a positive Break duration.";
+                    continue;
+                }
+
+                var kind = (BreakPromptKind)prompt.SelectedIndex;
+                if (kind == BreakPromptKind.UserSelectedMovement
+                    && string.IsNullOrWhiteSpace(movement.Text))
+                {
+                    error.Text = "Enter the movement you want to use for this Break.";
+                    continue;
+                }
+
+                var updatedSettings = new BreakSettings(
+                    TimeSpan.FromMinutes(duration.Value),
+                    movement.Text);
+                await _store.SaveBreakSettingsAsync(updatedSettings);
+                var breakPrompt = new BreakPrompt(
+                    kind,
+                    kind == BreakPromptKind.UserSelectedMovement ? movement.Text : null);
+                bool started = await ExecuteCommandAsync(
+                    new BeginBreak(new BreakPlan(
+                        updatedSettings.DefaultBreakDuration,
+                        breakPrompt)),
+                    returnToTodayOnOutcome: false);
+                if (started)
+                {
+                    ShowBreakScreen();
+                }
+
+                return;
+            }
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            SetStatus("The Break could not be prepared. The saved task outcome is intact.");
+            await ShowTodayScreenAsync();
+        }
+    }
+
+    private async System.Threading.Tasks.Task PrepareReturningContextAsync(
+        SessionOutcome outcome)
+    {
+        _returningTask = null;
+        _returningContext = null;
+        if (_store is null || _focusedTask is null)
+        {
+            return;
+        }
+
+        if (outcome == SessionOutcome.Parked)
+        {
+            _returningTask = _focusedTask;
+        }
+        else
+        {
+            int focusedIndex = TodayItems
+                .Select(item => item.Task.Id)
+                .ToList()
+                .IndexOf(_focusedTask.Id);
+            _returningTask = TodayItems
+                .Skip(focusedIndex + 1)
+                .Select(item => item.Task)
+                .FirstOrDefault(task => task.State is not (TaskState.Completed or TaskState.Deferred));
+        }
+
+        if (_returningTask is not null)
+        {
+            _returningContext = await _store.LoadLatestContextCapsuleAsync(_returningTask.Id);
+        }
     }
 
     private async void OnLandingClick(object sender, RoutedEventArgs args)
@@ -734,6 +1116,62 @@ public sealed partial class MainWindow : Window
             returnToTodayOnOutcome: false);
     }
 
+    private async void OnBreakKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (args.Key == VirtualKey.E)
+        {
+            await EndBreakAsync();
+            args.Handled = true;
+        }
+    }
+
+    private async void OnEndBreakClick(object sender, RoutedEventArgs args)
+    {
+        await EndBreakAsync();
+    }
+
+    private async System.Threading.Tasks.Task EndBreakAsync()
+    {
+        if (!await ExecuteCommandAsync(new EndBreak(), returnToTodayOnOutcome: false))
+        {
+            return;
+        }
+
+        DomainTask? returningTask = _returningTask;
+        await ShowTodayScreenAsync();
+        if (returningTask is not null)
+        {
+            DomainTask currentTask = TodayItems
+                .Select(item => item.Task)
+                .SingleOrDefault(task => task.Id == returningTask.Id)
+                ?? returningTask;
+            await ConfirmAndStartTaskAsync(currentTask, requireConfirmation: true);
+        }
+    }
+
+    private async void OnBreakResumeWithoutAwayClick(object sender, RoutedEventArgs args)
+    {
+        await ExecuteCommandAsync(
+            new ResumeWithoutAwayTime(),
+            returnToTodayOnOutcome: false);
+    }
+
+    private async void OnBreakResumeIncludingAwayClick(object sender, RoutedEventArgs args)
+    {
+        if (!double.IsFinite(BreakIncludedAwayMinutes.Value)
+            || BreakIncludedAwayMinutes.Value < 0
+            || BreakIncludedAwayMinutes.Value >= TimeSpan.MaxValue.TotalMinutes)
+        {
+            BreakError.Text = "Enter zero or a positive number of minutes.";
+            return;
+        }
+
+        await ExecuteCommandAsync(
+            new ResumeIncludingAwayTime(TimeSpan.FromMinutes(
+                BreakIncludedAwayMinutes.Value)),
+            returnToTodayOnOutcome: false);
+    }
+
     private async System.Threading.Tasks.Task<bool> ExecuteCommandAsync(
         SessionCommand command,
         bool returnToTodayOnOutcome = true)
@@ -749,7 +1187,14 @@ public sealed partial class MainWindow : Window
         try
         {
             SessionTransition transition = await _sessionRuntime.ExecuteAsync(command);
-            UpdateFocusProjection();
+            if (BreakScreen.Visibility == Visibility.Visible)
+            {
+                UpdateBreakProjection();
+            }
+            else
+            {
+                UpdateFocusProjection();
+            }
             if (returnToTodayOnOutcome && IsTerminal(transition.Session.State))
             {
                 await ShowTodayScreenAsync();
@@ -757,8 +1202,15 @@ public sealed partial class MainWindow : Window
             else if (transition.Session.State is not RecoveryRequiredSessionState
                 && command is not RefreshSession)
             {
-                RecoveryPanel.Visibility = Visibility.Collapsed;
-                RevealControls();
+                if (BreakScreen.Visibility == Visibility.Visible)
+                {
+                    BreakRecoveryPanel.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    RecoveryPanel.Visibility = Visibility.Collapsed;
+                    RevealControls();
+                }
             }
 
             return true;
@@ -768,7 +1220,11 @@ public sealed partial class MainWindow : Window
             string message = command is ResumeIncludingAwayTime
                 ? "The included time exceeds the observed time away. Choose a smaller amount."
                 : "That action is not available in the current focus state.";
-            if (_sessionRuntime.Current?.State is RecoveryRequiredSessionState)
+            if (BreakScreen.Visibility == Visibility.Visible)
+            {
+                BreakError.Text = message;
+            }
+            else if (_sessionRuntime.Current?.State is RecoveryRequiredSessionState)
             {
                 RecoveryError.Text = message;
             }
@@ -820,7 +1276,53 @@ public sealed partial class MainWindow : Window
 
     private static bool IsTerminal(SessionState state)
     {
-        return state is CompletedSessionState or ParkedSessionState or DayClosedSessionState;
+        return state is
+            CompletedSessionState
+            or ParkedSessionState
+            or AbandonedSessionState
+            or DayClosedSessionState;
+    }
+
+    private static bool IsBreakState(SessionState state)
+    {
+        return state is
+            BreakSessionState
+            or BreakCompletedSessionState
+            or RecoveryRequiredSessionState { InterruptedPhase: ActiveSessionPhase.Break };
+    }
+
+    private static SessionOutcome GetOutcome(SessionState state)
+    {
+        return state switch
+        {
+            CompletedSessionState => SessionOutcome.Completed,
+            ParkedSessionState => SessionOutcome.Parked,
+            BreakSessionState @break => @break.PriorOutcome,
+            BreakCompletedSessionState @break => @break.PriorOutcome,
+            RecoveryRequiredSessionState
+            {
+                InterruptedPhase: ActiveSessionPhase.Break,
+                PriorOutcome: { } outcome,
+            } => outcome,
+            _ => throw new InvalidOperationException(
+                $"State '{state.Kind}' does not contain a Break outcome."),
+        };
+    }
+
+    private static BreakPlan GetBreakPlan(SessionState state)
+    {
+        return state switch
+        {
+            BreakSessionState @break => @break.Plan,
+            BreakCompletedSessionState @break => @break.Plan,
+            RecoveryRequiredSessionState
+            {
+                InterruptedPhase: ActiveSessionPhase.Break,
+                BreakPlan: { } plan,
+            } => plan,
+            _ => throw new InvalidOperationException(
+                $"State '{state.Kind}' does not contain a Break plan."),
+        };
     }
 
     private static bool IsExpectedFailure(Exception exception)
