@@ -29,9 +29,9 @@ public sealed class MigrationTests
             database,
             _testContext.CancellationToken);
 
-        Assert.AreEqual(3L, version);
-        Assert.AreEqual("context_capsules_and_break_recovery", name);
-        Assert.AreEqual(3L, count);
+        Assert.AreEqual(4L, version);
+        Assert.AreEqual("schedule_recovery_shutdown", name);
+        Assert.AreEqual(4L, count);
     }
 
     [TestMethod]
@@ -51,9 +51,9 @@ public sealed class MigrationTests
             "current_session_checkpoint",
             _testContext.CancellationToken);
 
-        Assert.AreEqual(3L, version);
-        Assert.AreEqual("context_capsules_and_break_recovery", name);
-        Assert.AreEqual(3L, count);
+        Assert.AreEqual(4L, version);
+        Assert.AreEqual("schedule_recovery_shutdown", name);
+        Assert.AreEqual(4L, count);
         Assert.AreEqual(1L, checkpointTableCount);
     }
 
@@ -108,7 +108,7 @@ public sealed class MigrationTests
 
     [TestMethod]
     [Timeout(10_000, CooperativeCancellation = true)]
-    public async System.Threading.Tasks.Task InitializeVersionTwoDatabaseAppliesVersionThree()
+    public async System.Threading.Tasks.Task InitializeVersionTwoDatabaseAppliesRemainingMigrations()
     {
         using var database = new TestDatabase();
         await CreateVersionTwoDatabaseAsync(database, _testContext.CancellationToken);
@@ -127,11 +127,67 @@ public sealed class MigrationTests
             "break_settings",
             _testContext.CancellationToken);
 
-        Assert.AreEqual(3L, version);
-        Assert.AreEqual("context_capsules_and_break_recovery", name);
-        Assert.AreEqual(3L, count);
+        Assert.AreEqual(4L, version);
+        Assert.AreEqual("schedule_recovery_shutdown", name);
+        Assert.AreEqual(4L, count);
         Assert.AreEqual(1L, capsuleTable);
         Assert.AreEqual(1L, settingsTable);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task InitializeVersionThreeDatabaseBackfillsCheckpointLedger()
+    {
+        using var database = new TestDatabase();
+        await CreateVersionThreeDatabaseAsync(database, _testContext.CancellationToken);
+        string taskId = Guid.NewGuid().ToString("D");
+        string sessionId = Guid.NewGuid().ToString("D");
+        await ExecuteAsync(
+            database,
+            $$"""
+            INSERT INTO today_plans(plan_date) VALUES ('2026-07-18');
+            INSERT INTO tasks(
+                task_id, full_title, short_focus_label, definition_of_done,
+                first_physical_action, next_physical_action, planned_start,
+                planned_duration_ticks, timing_mode, schedule_type, importance,
+                task_state, deleted_at_utc)
+            VALUES (
+                '{{taskId}}', 'Title', 'Focus', 'Done', 'Open file', NULL,
+                '09:00:00.0000000', 18000000000, 'CountUp', 'Flexible',
+                'Normal', 'Planned', NULL);
+            INSERT INTO schedule_entries(plan_date, task_id, position)
+            VALUES ('2026-07-18', '{{taskId}}', 0);
+            INSERT INTO current_session_checkpoint(
+                slot, session_id, task_id, timing_mode,
+                original_planned_duration_ticks, approved_limit_ticks,
+                session_state, committed_active_ticks, landing_ticks, break_ticks,
+                checkpointed_at_utc, resume_phase, boundary_kind, recovery_phase,
+                prior_outcome, started_at_utc, completed_at_utc, parked_at_utc,
+                day_closed_at_utc, parked_next_physical_action, abandoned_at_utc,
+                break_limit_ticks, break_prompt_kind, break_prompt_text)
+            VALUES (
+                1, '{{sessionId}}', '{{taskId}}', 'CountUp',
+                18000000000, 18000000000, 'Paused', 6000000000, 0, 0,
+                '2026-07-18T13:45:30.0000000+00:00', 'Focusing', NULL, NULL,
+                NULL, '2026-07-18T13:35:30.0000000+00:00', NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL);
+            """,
+            _testContext.CancellationToken);
+        using var store = CreateStore(database);
+
+        await store.InitializeAsync(_testContext.CancellationToken);
+        (long version, string name, long count) = await ReadMigrationAsync(
+            database,
+            _testContext.CancellationToken);
+        long committedTicks = await ReadScalarAsync(
+            database,
+            "SELECT committed_active_ticks FROM focus_session_records;",
+            _testContext.CancellationToken);
+
+        Assert.AreEqual(4L, version);
+        Assert.AreEqual("schedule_recovery_shutdown", name);
+        Assert.AreEqual(4L, count);
+        Assert.AreEqual(6000000000L, committedTicks);
     }
 
     [TestMethod]
@@ -171,7 +227,7 @@ public sealed class MigrationTests
                 applied_utc TEXT NOT NULL
             );
             INSERT INTO schema_migrations(version, name, applied_utc)
-            VALUES (4, 'future', '2026-07-18T00:00:00.0000000+00:00');
+            VALUES (5, 'future', '2026-07-18T00:00:00.0000000+00:00');
             """,
             _testContext.CancellationToken);
         using var store = CreateStore(database);
@@ -180,7 +236,7 @@ public sealed class MigrationTests
             await Assert.ThrowsExactlyAsync<TodayPlanStorageException>(
                 async () => await store.InitializeAsync(_testContext.CancellationToken));
 
-        Assert.Contains("version 4", exception.Message);
+        Assert.Contains("version 5", exception.Message);
         Assert.Contains("unknown or non-contiguous", exception.Message);
     }
 
@@ -224,6 +280,27 @@ public sealed class MigrationTests
             await command.ExecuteReaderAsync(_testContext.CancellationToken);
 
         Assert.IsFalse(await reader.ReadAsync(_testContext.CancellationToken));
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task VersionFourSchemaRejectsNegativeScheduleRevision()
+    {
+        using var database = new TestDatabase();
+        using var store = CreateStore(database);
+        await store.InitializeAsync(_testContext.CancellationToken);
+        await ExecuteAsync(
+            database,
+            "INSERT INTO today_plans(plan_date) VALUES ('2026-07-18');",
+            _testContext.CancellationToken);
+
+        SqliteException exception = await Assert.ThrowsExactlyAsync<SqliteException>(
+            async () => await ExecuteAsync(
+                database,
+                "UPDATE today_plans SET schedule_revision = -1 WHERE plan_date = '2026-07-18';",
+                _testContext.CancellationToken));
+
+        Assert.AreEqual(19, exception.SqliteErrorCode);
     }
 
     [TestMethod]
@@ -362,6 +439,29 @@ public sealed class MigrationTests
             cancellationToken);
     }
 
+    private static async System.Threading.Tasks.Task CreateVersionThreeDatabaseAsync(
+        TestDatabase database,
+        CancellationToken cancellationToken)
+    {
+        await CreateVersionTwoDatabaseAsync(database, cancellationToken);
+        const string resourceName =
+            "NowNext.App.Persistence.Migrations.0003_context_capsules_and_break_recovery.sql";
+        await using Stream stream = typeof(TodayPlanStore).Assembly
+            .GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException("The version 3 migration is missing.");
+        using var reader = new StreamReader(stream);
+        string migrationSql = await reader.ReadToEndAsync(cancellationToken);
+        await ExecuteAsync(
+            database,
+            $"""
+            {migrationSql}
+            INSERT INTO schema_migrations(version, name, applied_utc)
+            VALUES (3, 'context_capsules_and_break_recovery',
+                '2026-07-18T00:00:00.0000000+00:00');
+            """,
+            cancellationToken);
+    }
+
     private static async System.Threading.Tasks.Task<(long Version, string Name, long Count)>
         ReadMigrationAsync(TestDatabase database, CancellationToken cancellationToken)
     {
@@ -398,6 +498,19 @@ public sealed class MigrationTests
               AND name = $name;
             """;
         command.Parameters.AddWithValue("$name", objectName);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async System.Threading.Tasks.Task<long> ReadScalarAsync(
+        TestDatabase database,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteConnection connection = database.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
         object? result = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
     }

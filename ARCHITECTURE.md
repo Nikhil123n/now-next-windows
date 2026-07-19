@@ -42,14 +42,15 @@ or ML capabilities.
 
 `NowNext.Core` remains package-free. `NowNext.Core.Tests` uses the globally pinned
 MSTest SDK. `CommunityToolkit.Mvvm` `8.4.2` remains a centrally pinned future baseline
-and is not referenced.
+and is not referenced. Prompt 7 adds no production dependency.
 
 ## Project boundaries
 
-- `NowNext.Core` contains the immutable Today task and ordering model plus the pure,
-  authoritative focus-session state machine. It owns domain validation, transitions,
-  timer projections, and durable-checkpoint validation while remaining free of WinUI,
-  Windows storage, and package dependencies.
+- `NowNext.Core` contains the immutable Today task and ordering model, the pure
+  authoritative focus-session state machine, the deterministic same-day repair engine,
+  and workday projections. It owns domain validation, transitions, timer/recovery/
+  Shutdown projections, and durable-checkpoint validation while remaining free of
+  WinUI, Windows storage, and package dependencies.
 - `NowNext.App` contains the plain Today and Focus WinUI surfaces, small stateless
   presentation formatters/policies, the narrow Windows lifecycle/runtime bridge, and the
   concrete SQLite store. It initializes the per-user database before loading Today and
@@ -90,15 +91,28 @@ foreground `DispatcherQueueTimer` requests read-only Core projections for render
 periodic persisted checkpoints; it never increments elapsed time and stops outside the
 Focus surface. There is no actor, channel, hosted service, or background worker.
 
-The WinUI layer uses direct code-behind composition because there are only three screens
-and no reusable application-service graph. Today mutations call the concrete store and
-reload the immutable plan. Focus commands call `FocusSessionRuntime`; the view formats
-only its `SessionView`. Introducing MVVM infrastructure or another layer requires a
-demonstrated coordination or reuse need.
+The foreground UI observes its refresh interval with a monotonic timestamp. A missed
+interval of at least 15 minutes reloads the last durable checkpoint as
+RecoveryRequired, excluding the unobserved tail. Short render delays continue to read
+the normal authoritative monotonic projection. Recovery shows one decision column with
+the next Fixed commitment and realistic nonnegative time before the earlier of that
+commitment or shutdown; rebuilding only creates a proposal.
 
-Schedule repair is a pure, deterministic proposal before persistence: preserve Fixed
-items and shutdown, consume buffer, move Flexible work, then suggest a deferral if
-needed. Applying the proposal is a separate, transactional, user-approved operation.
+The WinUI layer uses direct code-behind composition because there is one small vertical
+slice and no reusable application-service graph. Today mutations call the concrete store
+and reload the immutable plan. Focus commands call `FocusSessionRuntime`; the view
+formats only its `SessionView`. Introducing MVVM infrastructure or another layer
+requires a demonstrated coordination or reuse need.
+
+Schedule repair is a pure, deterministic proposal before persistence. Local offsets from
+midnight prevent wraparound: exclude resolved work, protect the authoritative current
+finish, Fixed intervals, and shutdown, place Flexible work in stable order through
+available gaps, then suggest the latest Normal Flexible task (or latest Important task)
+if one deferral is needed. One insufficient deferral or a protected-time conflict yields
+a non-acceptable impossible proposal. Applying a feasible changed proposal is a separate
+user-approved transaction guarded by the exact schedule revision and shutdown. Undo
+reverses only the latest same-day accepted repair and refuses if an affected value has
+since changed.
 
 ## Persistence and migrations
 
@@ -110,9 +124,18 @@ The App stores `now-next.db` under the package user's LocalState directory. Sche
 1 supports create, edit, soft delete, reorder, and load for the injected clock's local
 day. Version 2 adds the single durable current-session checkpoint. Version 3 extends that
 checkpoint for bounded Break recovery and adds minimal Context Capsules and Break
-settings. Park, task lifecycle, checkpoint, and capsule changes commit atomically. See
-[the SQLite schema contract](docs/sqlite-schema.md). Task rows and capsules are retained
-after schedule deletion, but no general session-history table exists yet.
+settings. Version 4 adds schedule revisions, explicit day settings, a retained
+focus-session ledger, accepted-repair explanation/undo records, and durable day closure.
+The current checkpoint is backfilled into the ledger when it still belongs to the plan.
+Park, task lifecycle, checkpoint, ledger, repair, and closure changes use explicit
+transactions. See [the SQLite schema contract](docs/sqlite-schema.md). Task, capsule, and
+ledger rows are retained after schedule deletion, but there is no general history view.
+
+Shutdown requires an explicitly configured time. Its summary totals retained active
+focus (including Landing and excluding Break), persists closure and any final session
+checkpoint before publishing success, and then calls the narrow
+`IKeepAwakeController.Release()` hook. The prototype hook is an idempotent no-op; a
+release failure cannot reopen the durable day.
 
 Maintain an ordered schema-migration table. Once a migration reaches `main`, never edit,
 renumber, or reuse it; add a forward migration. Migration application is transactional

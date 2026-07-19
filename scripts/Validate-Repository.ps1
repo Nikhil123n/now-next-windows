@@ -75,17 +75,20 @@ $requiredFiles = @(
     'docs\decisions\0002-authoritative-time-and-recovery.md',
     'docs\decisions\0003-sqlite-persistence-and-migrations.md',
     'docs\decisions\0004-app-owned-sqlite-persistence.md',
+    'docs\decisions\0005-deterministic-repair-and-day-closure.md',
     'docs\plans\PLAN_TEMPLATE.md',
     'docs\plans\prompt-2-application-scaffold.md',
     'docs\plans\prompt-3-today-domain-and-sqlite.md',
     'docs\plans\prompt-4-authoritative-timer-state-machine.md',
     'docs\plans\prompt-5-today-focus-vertical-slice.md',
     'docs\plans\prompt-6-context-break-journey.md',
+    'docs\plans\prompt-7-schedule-recovery-shutdown.md',
     'docs\sqlite-schema.md',
     'docs\timer-invariants.md',
     'docs\testing\README.md',
     'docs\testing\prompt-5-manual-test-script.md',
     'docs\testing\prompt-6-manual-test-script.md',
+    'docs\testing\prompt-7-manual-test-script.md',
     'scripts\Database-Dev.ps1',
     'scripts\Verify.ps1',
     'scripts\Validate-AgentSkills.ps1',
@@ -96,6 +99,7 @@ $requiredFiles = @(
     'src\NowNext.App\Assets\Square44x44Logo.scale-200.png',
     'src\NowNext.App\Assets\StoreLogo.png',
     'src\NowNext.App\FocusSessionRuntime.cs',
+    'src\NowNext.App\IKeepAwakeController.cs',
     'src\NowNext.App\MainWindow.xaml',
     'src\NowNext.App\MainWindow.xaml.cs',
     'src\NowNext.App\NowNext.App.csproj',
@@ -103,10 +107,14 @@ $requiredFiles = @(
     'src\NowNext.App\Persistence\Migrations\0001_initial_today_plan.sql',
     'src\NowNext.App\Persistence\Migrations\0002_current_focus_session_checkpoint.sql',
     'src\NowNext.App\Persistence\Migrations\0003_context_capsules_and_break_recovery.sql',
+    'src\NowNext.App\Persistence\Migrations\0004_schedule_recovery_shutdown.sql',
     'src\NowNext.App\Persistence\BreakSettings.cs',
+    'src\NowNext.App\Persistence\DayClosure.cs',
+    'src\NowNext.App\Persistence\DaySettings.cs',
     'src\NowNext.App\Persistence\TodayPlanStorageException.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.Sessions.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.Context.cs',
+    'src\NowNext.App\Persistence\TodayPlanStore.Workday.cs',
     'src\NowNext.App\Persistence\TodayPlanStore.cs',
     'src\NowNext.App\app.manifest',
     'src\NowNext.App\packages.lock.json',
@@ -132,6 +140,9 @@ $requiredFiles = @(
     'src\NowNext.Core\Sessions\SessionTypes.cs',
     'src\NowNext.Core\Sessions\SessionView.cs',
     'src\NowNext.Core\packages.lock.json',
+    'src\NowNext.Core\Planning\ScheduleRepairEngine.cs',
+    'src\NowNext.Core\Planning\ScheduleRepairModels.cs',
+    'src\NowNext.Core\Planning\WorkdayProjections.cs',
     'tests\NowNext.Core.Tests\CoreAssemblySmokeTests.cs',
     'tests\NowNext.Core.Tests\Domain\TaskTests.cs',
     'tests\NowNext.Core.Tests\Domain\TodayPlanTests.cs',
@@ -140,11 +151,15 @@ $requiredFiles = @(
     'tests\NowNext.Core.Tests\Persistence\CurrentSessionStoreTests.cs',
     'tests\NowNext.Core.Tests\Persistence\ContextAndBreakStoreTests.cs',
     'tests\NowNext.Core.Tests\Persistence\TodayPlanStoreTests.cs',
+    'tests\NowNext.Core.Tests\Persistence\WorkdayStoreTests.cs',
+    'tests\NowNext.Core.Tests\Planning\ScheduleRepairEngineTests.cs',
+    'tests\NowNext.Core.Tests\Planning\WorkdayProjectionTests.cs',
     'tests\NowNext.Core.Tests\Presentation\FocusControlPolicyTests.cs',
     'tests\NowNext.Core.Tests\Presentation\BreakViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\FocusViewContractTests.cs',
     'tests\NowNext.Core.Tests\Presentation\TaskEditorInputTests.cs',
     'tests\NowNext.Core.Tests\Presentation\TimerDisplayFormatterTests.cs',
+    'tests\NowNext.Core.Tests\Presentation\WorkdayViewContractTests.cs',
     'tests\NowNext.Core.Tests\Runtime\FocusSessionRuntimeTests.cs',
     'tests\NowNext.Core.Tests\Sessions\FocusSessionMachineTests.cs',
     'tests\NowNext.Core.Tests\Sessions\ContextCapsuleTests.cs',
@@ -171,9 +186,11 @@ $requiredDirectories = @(
     'src\NowNext.App\Persistence\Migrations',
     'src\NowNext.App\Presentation',
     'src\NowNext.Core\Domain',
+    'src\NowNext.Core\Planning',
     'src\NowNext.Core\Sessions',
     'tests\NowNext.Core.Tests\Domain',
     'tests\NowNext.Core.Tests\Persistence',
+    'tests\NowNext.Core.Tests\Planning',
     'tests\NowNext.Core.Tests\Presentation',
     'tests\NowNext.Core.Tests\Runtime',
     'tests\NowNext.Core.Tests\Sessions',
@@ -427,7 +444,8 @@ if ($sqlitePackageOwners.Count -ne 1 -or
 $expectedMigrations = @(
     '0001_initial_today_plan.sql',
     '0002_current_focus_session_checkpoint.sql',
-    '0003_context_capsules_and_break_recovery.sql'
+    '0003_context_capsules_and_break_recovery.sql',
+    '0004_schedule_recovery_shutdown.sql'
 )
 $migrationFiles = @(Get-ChildItem -LiteralPath (
         Join-Path $repositoryRoot 'src\NowNext.App\Persistence\Migrations') -File -Filter '*.sql' |
@@ -438,12 +456,12 @@ foreach ($difference in @(Compare-Object $expectedMigrations $migrationFiles)) {
 }
 
 $documentationRequirements = @{
-    'AGENTS.md' = 'current vertical slice'
-    'ARCHITECTURE.md' = 'foreground `DispatcherQueueTimer`'
+    'AGENTS.md' = 'deterministic same-day repair'
+    'ARCHITECTURE.md' = 'focus-session ledger'
     'SCOPE.md' = '## Current vertical-slice boundary'
-    'docs\testing\README.md' = 'Prompt 6 manual test script'
-    'docs\sqlite-schema.md' = 'current_session_checkpoint'
-    'docs\timer-invariants.md' = 'RecoveryRequired'
+    'docs\testing\README.md' = 'Prompt 7 manual test script'
+    'docs\sqlite-schema.md' = 'Version 4 schedule repair'
+    'docs\timer-invariants.md' = 'at least 15'
 }
 foreach ($requirement in $documentationRequirements.GetEnumerator()) {
     $path = Join-Path $repositoryRoot $requirement.Key

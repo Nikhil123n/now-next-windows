@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Text;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -10,6 +11,7 @@ using Microsoft.UI.Xaml.Input;
 using NowNext.App.Persistence;
 using NowNext.App.Presentation;
 using NowNext.Core.Domain;
+using NowNext.Core.Planning;
 using NowNext.Core.Sessions;
 using Windows.System;
 using Windows.UI.ViewManagement;
@@ -23,9 +25,11 @@ public sealed partial class MainWindow : Window
 {
     private const int ControlsInactivitySeconds = 6;
     private const int CheckpointIntervalTicks = 20;
+    private static readonly TimeSpan SubstantialAbsenceThreshold = TimeSpan.FromMinutes(15);
 
     private readonly TodayPlanStore? _store;
     private readonly FocusSessionRuntime? _sessionRuntime;
+    private readonly IKeepAwakeController? _keepAwakeController;
     private readonly DispatcherQueueTimer _focusProjectionTimer;
     private readonly DispatcherQueueTimer _colonTimer;
     private readonly DispatcherQueueTimer _controlsInactivityTimer;
@@ -35,16 +39,24 @@ public sealed partial class MainWindow : Window
     private DomainTask? _focusedTask;
     private DomainTask? _returningTask;
     private ContextCapsule? _returningContext;
+    private WorkdaySnapshot? _workdaySnapshot;
+    private ScheduleRepairProposal? _pendingRepair;
     private bool _commandInProgress;
     private bool _colonVisible = true;
     private bool _allowClose;
     private bool _closeCheckpointInProgress;
     private int _ticksSinceCheckpoint;
+    private long _lastProjectionTimestamp;
 
-    public MainWindow(TodayPlanStore store, FocusSessionRuntime sessionRuntime)
+    public MainWindow(
+        TodayPlanStore store,
+        FocusSessionRuntime sessionRuntime,
+        IKeepAwakeController keepAwakeController)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _sessionRuntime = sessionRuntime ?? throw new ArgumentNullException(nameof(sessionRuntime));
+        _keepAwakeController = keepAwakeController
+            ?? throw new ArgumentNullException(nameof(keepAwakeController));
         InitializeComponent();
         _focusProjectionTimer = DispatcherQueue.CreateTimer();
         _focusProjectionTimer.Interval = TimeSpan.FromMilliseconds(250);
@@ -56,6 +68,7 @@ public sealed partial class MainWindow : Window
         _controlsInactivityTimer.Interval = TimeSpan.FromSeconds(ControlsInactivitySeconds);
         _controlsInactivityTimer.IsRepeating = false;
         _controlsInactivityTimer.Tick += OnControlsInactivityTimerTick;
+        _lastProjectionTimestamp = TimeProvider.System.GetTimestamp();
     }
 
     public MainWindow(string statusMessage)
@@ -65,6 +78,7 @@ public sealed partial class MainWindow : Window
         _focusProjectionTimer = DispatcherQueue.CreateTimer();
         _colonTimer = DispatcherQueue.CreateTimer();
         _controlsInactivityTimer = DispatcherQueue.CreateTimer();
+        _lastProjectionTimestamp = TimeProvider.System.GetTimestamp();
         AddTaskButton.IsEnabled = false;
         SetStatus(statusMessage);
     }
@@ -103,6 +117,12 @@ public sealed partial class MainWindow : Window
         try
         {
             await ReloadTodayAsync();
+            if (_workdaySnapshot?.Closure is { } closure)
+            {
+                ShowRestingScreen(closure);
+                return;
+            }
+
             FocusSession? current = _sessionRuntime.Current;
             if (current is not null && current.State is not (AbandonedSessionState or DayClosedSessionState))
             {
@@ -204,6 +224,7 @@ public sealed partial class MainWindow : Window
         TimingModeInput.SelectedIndex = 0;
         ScheduleTypeInput.SelectedIndex = 1;
         ImportanceInput.SelectedIndex = 0;
+        FixedUnlockConfirmation.IsChecked = false;
         await ShowTaskEditorAsync();
     }
 
@@ -227,6 +248,7 @@ public sealed partial class MainWindow : Window
         TimingModeInput.SelectedIndex = item.Task.TimingMode == TimingMode.CountUp ? 0 : 1;
         ScheduleTypeInput.SelectedIndex = item.Task.ScheduleType == ScheduleType.Fixed ? 0 : 1;
         ImportanceInput.SelectedIndex = item.Task.Importance == TaskImportance.Normal ? 0 : 1;
+        FixedUnlockConfirmation.IsChecked = false;
         await ShowTaskEditorAsync();
     }
 
@@ -277,6 +299,18 @@ public sealed partial class MainWindow : Window
             if (!input.TryCreateTask(taskId, nextAction, state, out DomainTask? task, out string error))
             {
                 TaskEditorError.Text = error;
+                args.Cancel = true;
+                return;
+            }
+
+            bool changesProtectedFixed = _editingTask?.ScheduleType == ScheduleType.Fixed
+                && (_editingTask.PlannedStart != task!.PlannedStart
+                    || _editingTask.PlannedDuration != task.PlannedDuration
+                    || task.ScheduleType != ScheduleType.Fixed);
+            if (changesProtectedFixed && FixedUnlockConfirmation.IsChecked != true)
+            {
+                TaskEditorError.Text =
+                    "Confirm the explicit Fixed-commitment unlock before saving this change.";
                 args.Cancel = true;
                 return;
             }
@@ -471,6 +505,7 @@ public sealed partial class MainWindow : Window
         }
 
         TodayScreen.Visibility = Visibility.Collapsed;
+        RestingScreen.Visibility = Visibility.Collapsed;
         BreakScreen.Visibility = Visibility.Collapsed;
         FocusScreen.Visibility = Visibility.Visible;
         FocusLabelText.Text = _focusedTask.ShortFocusLabel;
@@ -480,6 +515,7 @@ public sealed partial class MainWindow : Window
         TimerFirstColonText.Opacity = 1;
         TimerSecondColonText.Opacity = 1;
         _ticksSinceCheckpoint = 0;
+        _lastProjectionTimestamp = TimeProvider.System.GetTimestamp();
         UpdateFocusProjection();
         _focusProjectionTimer.Start();
         _colonTimer.Start();
@@ -497,6 +533,7 @@ public sealed partial class MainWindow : Window
         FocusScreen.Visibility = Visibility.Collapsed;
         BreakRecoveryPanel.Visibility = Visibility.Collapsed;
         BreakScreen.Visibility = Visibility.Collapsed;
+        RestingScreen.Visibility = Visibility.Collapsed;
         TodayScreen.Visibility = Visibility.Visible;
         _appWindow?.SetPresenter(AppWindowPresenterKind.Default);
         await ReloadTodayAsync();
@@ -518,6 +555,7 @@ public sealed partial class MainWindow : Window
         BreakError.Text = string.Empty;
         _colonTimer.Stop();
         _ticksSinceCheckpoint = 0;
+        _lastProjectionTimestamp = TimeProvider.System.GetTimestamp();
         UpdateBreakProjection();
         _focusProjectionTimer.Start();
         _appWindow?.SetPresenter(AppWindowPresenterKind.FullScreen);
@@ -533,6 +571,31 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            long observedTimestamp = TimeProvider.System.GetTimestamp();
+            TimeSpan observationGap = TimeProvider.System.GetElapsedTime(
+                _lastProjectionTimestamp,
+                observedTimestamp);
+            _lastProjectionTimestamp = observedTimestamp;
+            if (observationGap >= SubstantialAbsenceThreshold
+                && _sessionRuntime.Current.State is
+                    FocusingSessionState
+                    or OvertimeSessionState
+                    or LandingSessionState
+                    or BreakSessionState)
+            {
+                await _sessionRuntime.ReloadForSubstantialAbsenceAsync();
+                if (BreakScreen.Visibility == Visibility.Visible)
+                {
+                    UpdateBreakProjection();
+                }
+                else
+                {
+                    UpdateFocusProjection();
+                }
+
+                return;
+            }
+
             SessionView projected = _sessionRuntime.GetCurrentView();
             if (BreakScreen.Visibility == Visibility.Visible)
             {
@@ -620,7 +683,34 @@ public sealed partial class MainWindow : Window
         {
             FocusControls.Visibility = Visibility.Collapsed;
             _controlsInactivityTimer.Stop();
+            UpdateRecoveryOverview(current);
         }
+    }
+
+    private void UpdateRecoveryOverview(FocusSession current)
+    {
+        if (_workdaySnapshot?.Settings is not { } settings
+            || _workdaySnapshot.Plan.Entries.All(entry => entry.Task.Id != current.TaskId))
+        {
+            RecoveryNextFixedText.Text = "Configure protected shutdown on Today to rebuild the day.";
+            RecoveryAvailableTimeText.Text = string.Empty;
+            return;
+        }
+
+        DateTimeOffset localNow = TimeProvider.System.GetLocalNow();
+        RecoveryOverview overview = WorkdayProjections.CreateRecoveryOverview(
+            _workdaySnapshot.Plan,
+            current.TaskId,
+            TimeOnly.FromDateTime(localNow.DateTime),
+            settings.ShutdownTime);
+        RecoveryNextFixedText.Text = overview.NextFixedTaskId is null
+            ? "Next Fixed commitment: none remaining."
+            : $"Next Fixed commitment: {GetTaskLabel(overview.NextFixedTaskId.Value)} at "
+                + overview.NextFixedStart!.Value.ToString("t", CultureInfo.CurrentCulture)
+                + ".";
+        RecoveryAvailableTimeText.Text =
+            $"Realistically available before the next protected boundary: "
+            + $"{FormatDuration(overview.RealisticAvailableTime)}.";
     }
 
     private void UpdateBreakProjection()
@@ -1091,9 +1181,15 @@ public sealed partial class MainWindow : Window
 
     private async System.Threading.Tasks.Task ExtendAsync(double minutes)
     {
-        await ExecuteCommandAsync(
-            new ExtendSession(TimeSpan.FromMinutes(minutes)),
-            returnToTodayOnOutcome: false);
+        TimeSpan extension = TimeSpan.FromMinutes(minutes);
+        if (await ExecuteCommandAsync(
+                new ExtendSession(extension),
+                returnToTodayOnOutcome: false))
+        {
+            await ReviewRepairAsync(
+                ScheduleRepairTriggerKind.SessionExtended,
+                extension);
+        }
     }
 
     private async void OnResumeWithoutAwayClick(object sender, RoutedEventArgs args)
@@ -1242,6 +1338,435 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void OnSaveDaySettingsClick(object sender, RoutedEventArgs args)
+    {
+        if (_store is null || _workdaySnapshot is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (ShutdownTimeInput.SelectedTime is not { } selectedShutdown)
+            {
+                SetStatus("Choose today's protected shutdown time explicitly.");
+                return;
+            }
+
+            TimeOnly shutdown = TimeOnly.FromTimeSpan(selectedShutdown);
+            if (_workdaySnapshot.Settings is { } existing
+                && existing.ShutdownTime != shutdown)
+            {
+                var confirmation = new ContentDialog
+                {
+                    Title = "Change protected shutdown?",
+                    Content =
+                        $"This explicitly changes shutdown from "
+                        + $"{existing.ShutdownTime.ToString("t", CultureInfo.CurrentCulture)} "
+                        + $"to {shutdown.ToString("t", CultureInfo.CurrentCulture)}.",
+                    PrimaryButtonText = "Change protected time",
+                    CloseButtonText = "Keep current time",
+                    DefaultButton = ContentDialogButton.Close,
+                    XamlRoot = RootGrid.XamlRoot,
+                };
+                if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
+                {
+                    ShutdownTimeInput.SelectedTime = existing.ShutdownTime.ToTimeSpan();
+                    return;
+                }
+            }
+
+            TaskId? dailyWinTaskId = (DailyWinInput.SelectedItem as ComboBoxItem)?.Tag
+                is TaskId selected
+                    ? selected
+                    : null;
+            await _store.SaveDaySettingsAsync(new DaySettings(
+                _workdaySnapshot.Plan.Date,
+                shutdown,
+                dailyWinTaskId));
+            await ReloadTodayAsync();
+            StatusText.Text = "Protected shutdown and optional Daily Win saved.";
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            SetStatus("Today's protected settings could not be saved.");
+        }
+    }
+
+    private async void OnReviewRepairClick(object sender, RoutedEventArgs args)
+    {
+        await ReviewRepairAsync(ScheduleRepairTriggerKind.CurrentTime, extension: null);
+    }
+
+    private async System.Threading.Tasks.Task ReviewRepairAsync(
+        ScheduleRepairTriggerKind triggerKind,
+        TimeSpan? extension)
+    {
+        if (_store is null || _workdaySnapshot is null)
+        {
+            return;
+        }
+
+        if (_workdaySnapshot.Settings is null)
+        {
+            SetStatus("Configure today's protected shutdown before reviewing repair.");
+            return;
+        }
+
+        try
+        {
+            _workdaySnapshot = await _store.LoadWorkdaySnapshotAsync();
+            _pendingRepair = CreateRepairProposal(_workdaySnapshot, triggerKind, extension);
+            ScheduleRepairProposal proposal = _pendingRepair;
+            var explanation = new StringBuilder();
+            string extensionDescription = proposal.Request.Trigger.Extension is
+            { } recordedExtension
+                    ? $" ({FormatDuration(recordedExtension)})"
+                    : string.Empty;
+            explanation.AppendLine(string.Format(
+                CultureInfo.CurrentCulture,
+                "Trigger: {0}{1}. Buffer consumed: {2}.",
+                proposal.Request.Trigger.Kind,
+                extensionDescription,
+                FormatDuration(proposal.BufferConsumed)));
+            foreach (BufferConsumption consumption in proposal.BufferConsumptions)
+            {
+                string boundary = consumption.BeforeTaskId is { } beforeTaskId
+                    ? $"before {GetTaskLabel(beforeTaskId)}"
+                    : "before protected shutdown";
+                explanation.AppendLine(
+                    CultureInfo.CurrentCulture,
+                    $"Buffer {boundary}: {FormatDuration(consumption.Duration)}.");
+            }
+
+            foreach (ScheduleMove move in proposal.Moves)
+            {
+                explanation.AppendLine(
+                    CultureInfo.CurrentCulture,
+                    $"Move {GetTaskLabel(move.TaskId)} from "
+                    + $"{move.OriginalStart.ToString("t", CultureInfo.CurrentCulture)} to "
+                    + $"{move.RevisedStart.ToString("t", CultureInfo.CurrentCulture)}.");
+            }
+
+            if (proposal.Deferral is { } deferral)
+            {
+                explanation.AppendLine(
+                    CultureInfo.CurrentCulture,
+                    $"Defer {GetTaskLabel(deferral.TaskId)}.");
+            }
+
+            explanation.AppendLine(
+                CultureInfo.CurrentCulture,
+                $"Revised finish: {FormatClockOffset(proposal.RevisedFinishFromMidnight)}.");
+            if (proposal.Overflow > TimeSpan.Zero)
+            {
+                explanation.AppendLine(
+                    CultureInfo.CurrentCulture,
+                    $"Remaining overflow: {FormatDuration(proposal.Overflow)}.");
+            }
+
+            if (proposal.ProtectedFixedCommitments.Count == 0)
+            {
+                explanation.AppendLine("Protected Fixed commitments: none.");
+            }
+            else
+            {
+                explanation.AppendLine("Protected Fixed commitments:");
+                foreach (ProtectedFixedCommitment protection in proposal.ProtectedFixedCommitments)
+                {
+                    explanation.AppendLine(
+                        CultureInfo.CurrentCulture,
+                        $"- {GetTaskLabel(protection.TaskId)} at {protection.Start.ToString("t", CultureInfo.CurrentCulture)}");
+                }
+            }
+
+            explanation.AppendLine(
+                $"Protected shutdown remains "
+                + proposal.Request.ShutdownTime.ToString("t", CultureInfo.CurrentCulture)
+                + ".");
+            if (proposal.Status == ScheduleRepairStatus.Impossible)
+            {
+                explanation.AppendLine(
+                    CultureInfo.CurrentCulture,
+                    $"No automatic apply is available: {DescribeRepairIssue(proposal.Issue)}");
+            }
+
+            var dialog = new ContentDialog
+            {
+                Title = proposal.Status == ScheduleRepairStatus.Impossible
+                    ? "The day needs a manual decision"
+                    : proposal.Status == ScheduleRepairStatus.NoChange
+                        ? "The plan still fits"
+                        : "One recommended repair",
+                Content = new ScrollViewer
+                {
+                    MaxHeight = 520,
+                    Content = new TextBlock
+                    {
+                        Text = explanation.ToString(),
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                },
+                PrimaryButtonText = proposal.CanApply ? "Accept repair" : string.Empty,
+                CloseButtonText = "Keep current plan",
+                DefaultButton = proposal.CanApply
+                    ? ContentDialogButton.Primary
+                    : ContentDialogButton.Close,
+                XamlRoot = RootGrid.XamlRoot,
+            };
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                await _store.ApplyScheduleRepairAsync(proposal);
+                await ReloadTodayAsync();
+                StatusText.Text = "The approved repair was applied.";
+            }
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            SetStatus("The repair could not be reviewed. Reload Today and try again.");
+        }
+    }
+
+    private async void OnUndoRepairClick(object sender, RoutedEventArgs args)
+    {
+        if (_store is null)
+        {
+            return;
+        }
+
+        try
+        {
+            bool undone = await _store.UndoLatestScheduleRepairAsync();
+            await ReloadTodayAsync();
+            StatusText.Text = undone
+                ? "The latest accepted repair was undone."
+                : "There is no accepted repair available to undo.";
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            SetStatus("The latest repair cannot be undone after its affected tasks changed.");
+        }
+    }
+
+    private async void OnShutdownClick(object sender, RoutedEventArgs args)
+    {
+        await ShowShutdownAsync();
+    }
+
+    private async System.Threading.Tasks.Task ShowShutdownAsync()
+    {
+        if (_store is null || _sessionRuntime is null || _keepAwakeController is null)
+        {
+            return;
+        }
+
+        if (_workdaySnapshot?.Settings is null)
+        {
+            SetStatus("Configure today's protected shutdown before closing the workday.");
+            return;
+        }
+
+        FocusSession? current = _sessionRuntime.Current;
+        if (current?.State is not (
+            ReadySessionState
+            or CompletedSessionState
+            or ParkedSessionState
+            or AbandonedSessionState
+            or BreakSessionState
+            or BreakCompletedSessionState
+            or DayClosedSessionState)
+            && current is not null)
+        {
+            SetStatus("Resolve the interrupted or active focus session before Shutdown.");
+            return;
+        }
+
+        try
+        {
+            ShutdownSummary summary = await _store.CreateShutdownSummaryAsync();
+            string completed = summary.Completed.Count == 0
+                ? "None"
+                : string.Join(", ", summary.Completed.Select(item => GetTaskLabel(item.TaskId)));
+            string deferred = summary.Deferred.Count == 0
+                ? "None"
+                : string.Join(", ", summary.Deferred.Select(item => GetTaskLabel(item.TaskId)));
+            string dailyWin = summary.DailyWinStatus switch
+            {
+                DailyWinStatus.NotSelected => "No Daily Win selected",
+                DailyWinStatus.Completed => "Daily Win completed",
+                DailyWinStatus.NotCompleted => "Daily Win not completed",
+                _ => throw new InvalidOperationException("Daily Win status is invalid."),
+            };
+            var content = new TextBlock
+            {
+                Text =
+                    $"Completed: {completed}\n"
+                    + $"Deliberately deferred: {deferred}\n"
+                    + $"Planned: {FormatDuration(summary.TotalPlannedDuration)}; "
+                    + $"actual focused: {FormatDuration(summary.TotalActualDuration)}\n"
+                    + $"{dailyWin}\n"
+                    + (summary.NextUnfinishedTaskId is null
+                        ? "No unfinished task remains."
+                        : $"Next action for {GetTaskLabel(summary.NextUnfinishedTaskId.Value)}: "
+                            + summary.NextPhysicalAction),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            var dialog = new ContentDialog
+            {
+                Title = "Close the workday?",
+                Content = content,
+                PrimaryButtonText = "Confirm Shutdown",
+                CloseButtonText = "Keep day open",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = RootGrid.XamlRoot,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            DayClosure closure = await _sessionRuntime.CloseDayAsync(
+                summary,
+                _keepAwakeController);
+            ShowRestingScreen(closure);
+        }
+        catch (Exception exception) when (IsExpectedFailure(exception))
+        {
+            SetStatus("The workday could not be closed. The day remains open.");
+        }
+    }
+
+    private async void OnRecoveryRebuildClick(object sender, RoutedEventArgs args)
+    {
+        await ReviewRepairAsync(ScheduleRepairTriggerKind.RecoveryRebuild, extension: null);
+    }
+
+    private async void OnRecoveryEndClick(object sender, RoutedEventArgs args)
+    {
+        await ResolveInterruptedSessionAsync(closeAfter: false);
+    }
+
+    private async void OnRecoveryCloseEarlyClick(object sender, RoutedEventArgs args)
+    {
+        if (_sessionRuntime?.Current?.State is RecoveryRequiredSessionState
+            {
+                InterruptedPhase: ActiveSessionPhase.Break,
+            })
+        {
+            if (await ExecuteCommandAsync(new EndBreak(), returnToTodayOnOutcome: false))
+            {
+                await ShowShutdownAsync();
+            }
+
+            return;
+        }
+
+        await ResolveInterruptedSessionAsync(closeAfter: true);
+    }
+
+    private async System.Threading.Tasks.Task ResolveInterruptedSessionAsync(bool closeAfter)
+    {
+        var outcome = new ComboBox
+        {
+            Header = "How should the interrupted task end?",
+            MinWidth = 300,
+            SelectedIndex = 0,
+            Items =
+            {
+                "Done",
+                "Park with a next action",
+                "Abandon explicitly",
+            },
+        };
+        var nextAction = new TextBox
+        {
+            Header = "Next physical action (required for Park)",
+            Text = _focusedTask?.NextPhysicalAction ?? string.Empty,
+        };
+        var note = new TextBox
+        {
+            Header = "Short Context Capsule note (optional)",
+        };
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var panel = new StackPanel { MinWidth = 440, Spacing = 12 };
+        panel.Children.Add(error);
+        panel.Children.Add(outcome);
+        panel.Children.Add(nextAction);
+        panel.Children.Add(note);
+        var dialog = new ContentDialog
+        {
+            Title = "End interrupted session",
+            Content = panel,
+            PrimaryButtonText = "Save outcome",
+            CloseButtonText = "Keep session",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = RootGrid.XamlRoot,
+        };
+        while (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            SessionCommand command;
+            if (outcome.SelectedIndex == 0)
+            {
+                command = new CompleteSession();
+            }
+            else if (outcome.SelectedIndex == 1)
+            {
+                if (string.IsNullOrWhiteSpace(nextAction.Text))
+                {
+                    error.Text = "Parking requires a next physical action.";
+                    continue;
+                }
+
+                command = new ParkSession(nextAction.Text, note.Text);
+            }
+            else
+            {
+                command = new AbandonSession();
+            }
+
+            if (!await ExecuteCommandAsync(command, returnToTodayOnOutcome: false))
+            {
+                return;
+            }
+
+            if (closeAfter)
+            {
+                await ShowShutdownAsync();
+            }
+            else
+            {
+                await ShowTodayScreenAsync();
+            }
+
+            return;
+        }
+    }
+
+    private string GetTaskLabel(TaskId taskId)
+    {
+        return TodayItems
+            .Select(item => item.Task)
+            .SingleOrDefault(task => task.Id == taskId)
+            ?.FullTitle ?? $"task {taskId}";
+    }
+
+    private void ShowRestingScreen(DayClosure closure)
+    {
+        _focusProjectionTimer.Stop();
+        _colonTimer.Stop();
+        _controlsInactivityTimer.Stop();
+        TodayScreen.Visibility = Visibility.Collapsed;
+        RestingScreen.Visibility = Visibility.Collapsed;
+        FocusScreen.Visibility = Visibility.Collapsed;
+        BreakScreen.Visibility = Visibility.Collapsed;
+        RestingScreen.Visibility = Visibility.Visible;
+        RestingSummaryText.Text =
+            $"Closed {closure.ClosedAtUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)}. "
+            + $"Planned {FormatDuration(closure.TotalPlannedDuration)}; "
+            + $"actual focused {FormatDuration(closure.TotalActualDuration)}.";
+        _appWindow?.SetPresenter(AppWindowPresenterKind.Default);
+    }
+
     private async System.Threading.Tasks.Task ReloadTodayAsync()
     {
         if (_store is null)
@@ -1249,7 +1774,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        TodayPlan plan = await _store.LoadTodayPlanAsync();
+        WorkdaySnapshot snapshot = await _store.LoadWorkdaySnapshotAsync();
+        _workdaySnapshot = snapshot;
+        TodayPlan plan = snapshot.Plan;
         TodayItems.Clear();
         foreach (ScheduleEntry entry in plan.Entries)
         {
@@ -1260,6 +1787,164 @@ public sealed partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         TodayDateText.Text = plan.Date.ToString("D", CultureInfo.CurrentCulture);
+        PopulateDaySettings(snapshot);
+        SetDayMutationAvailability(snapshot.Closure is null);
+        if (snapshot.Closure is null && snapshot.Settings is not null)
+        {
+            _pendingRepair = CreateRepairProposal(
+                snapshot,
+                ScheduleRepairTriggerKind.CurrentTime,
+                extension: null);
+            RepairCallout.Visibility = _pendingRepair.Status == ScheduleRepairStatus.NoChange
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            RepairCalloutText.Text = DescribeRepairStatus(_pendingRepair);
+        }
+        else
+        {
+            _pendingRepair = null;
+            RepairCallout.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void PopulateDaySettings(WorkdaySnapshot snapshot)
+    {
+        ShutdownTimeInput.SelectedTime = snapshot.Settings?.ShutdownTime.ToTimeSpan();
+        DailyWinInput.Items.Clear();
+        DailyWinInput.Items.Add(new ComboBoxItem
+        {
+            Content = "No Daily Win selected",
+            Tag = null,
+        });
+        int selectedIndex = 0;
+        foreach (TodayTaskItem item in TodayItems)
+        {
+            int index = DailyWinInput.Items.Count;
+            DailyWinInput.Items.Add(new ComboBoxItem
+            {
+                Content = item.Task.FullTitle,
+                Tag = item.Task.Id,
+            });
+            if (snapshot.Settings?.DailyWinTaskId == item.Task.Id)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        DailyWinInput.SelectedIndex = selectedIndex;
+    }
+
+    private void SetDayMutationAvailability(bool isOpen)
+    {
+        AddTaskButton.IsEnabled = isOpen;
+        TodayTaskList.IsEnabled = isOpen;
+        DayControls.IsHitTestVisible = isOpen;
+        DayControls.Opacity = isOpen ? 1 : 0.56;
+    }
+
+    private ScheduleRepairProposal CreateRepairProposal(
+        WorkdaySnapshot snapshot,
+        ScheduleRepairTriggerKind triggerKind,
+        TimeSpan? extension)
+    {
+        DaySettings settings = snapshot.Settings
+            ?? throw new InvalidOperationException(
+                "Configure today's protected shutdown before reviewing repair.");
+        DateTimeOffset localNow = TimeProvider.System.GetLocalNow();
+        FocusSession? session = _sessionRuntime?.Current;
+        TaskId? currentTaskId = session?.State is
+            ReadySessionState
+            or CompletedSessionState
+            or ParkedSessionState
+            or AbandonedSessionState
+            or DayClosedSessionState
+                ? null
+                : session?.TaskId;
+        TimeSpan remaining = currentTaskId is null || _sessionRuntime is null
+            ? TimeSpan.Zero
+            : GetRemainingDuration(_sessionRuntime.GetCurrentView());
+        return ScheduleRepairEngine.Propose(new ScheduleRepairRequest(
+            new ScheduleRepairId(Guid.NewGuid()),
+            snapshot.ScheduleRevision,
+            snapshot.Plan,
+            TimeOnly.FromDateTime(localNow.DateTime),
+            settings.ShutdownTime,
+            new ScheduleRepairTrigger(
+                triggerKind,
+                localNow.ToUniversalTime(),
+                extension),
+            currentTaskId,
+            remaining));
+    }
+
+    private static TimeSpan GetRemainingDuration(SessionView view)
+    {
+        return view.Timer switch
+        {
+            CountUpTimerReading countUp when countUp.Elapsed < countUp.Limit =>
+                countUp.Limit - countUp.Elapsed,
+            CountdownTimerReading countdown => countdown.Remaining,
+            LandingTimerReading landing when landing.Elapsed < landing.Limit =>
+                landing.Limit - landing.Elapsed,
+            BreakTimerReading @break when @break.Elapsed < @break.Limit =>
+                @break.Limit - @break.Elapsed,
+            _ => TimeSpan.Zero,
+        };
+    }
+
+    private static string DescribeRepairStatus(ScheduleRepairProposal proposal)
+    {
+        return proposal.Status switch
+        {
+            ScheduleRepairStatus.NoChange =>
+                $"The plan still fits; {FormatDuration(proposal.BufferConsumed)} of buffer is consumed.",
+            ScheduleRepairStatus.RequiresApproval =>
+                $"{proposal.Moves.Count} task move(s), "
+                + $"{(proposal.Deferral is null ? "no deferral" : "one deferral")}, "
+                + $"finishing at {FormatClockOffset(proposal.RevisedFinishFromMidnight)}.",
+            ScheduleRepairStatus.Impossible =>
+                $"The protected plan needs a manual decision: {DescribeRepairIssue(proposal.Issue)}",
+            _ => throw new InvalidOperationException("Schedule repair status is invalid."),
+        };
+    }
+
+    private static string DescribeRepairIssue(ScheduleRepairIssue issue)
+    {
+        return issue switch
+        {
+            ScheduleRepairIssue.FixedCommitmentsOverlap =>
+                "Fixed commitments overlap.",
+            ScheduleRepairIssue.CurrentSessionOverlapsFixed =>
+                "the current session would overlap a Fixed commitment.",
+            ScheduleRepairIssue.FixedCommitmentMissed =>
+                "an unfinished Fixed commitment has already started.",
+            ScheduleRepairIssue.FixedCommitmentExceedsShutdown =>
+                "a Fixed commitment extends beyond protected shutdown.",
+            ScheduleRepairIssue.ScheduleCrossesMidnight =>
+                "remaining work crosses midnight.",
+            ScheduleRepairIssue.ShutdownHasPassed =>
+                "protected shutdown has already passed.",
+            ScheduleRepairIssue.InsufficientFlexibleTime =>
+                "deferring the one recommended Flexible task is not enough.",
+            _ => "the remaining plan cannot be repaired automatically.",
+        };
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        return duration.TotalMinutes < 1
+            ? "0 minutes"
+            : $"{Math.Round(duration.TotalMinutes, MidpointRounding.AwayFromZero)} minutes";
+    }
+
+    private static string FormatClockOffset(TimeSpan offset)
+    {
+        if (offset < TimeSpan.Zero || offset >= TimeSpan.FromDays(1))
+        {
+            return "outside today";
+        }
+
+        return DateTime.Today.Add(offset).ToString("t", CultureInfo.CurrentCulture);
     }
 
     private static bool TryGetItem(object sender, out TodayTaskItem item)

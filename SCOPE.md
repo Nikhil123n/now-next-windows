@@ -46,11 +46,15 @@ focus-session engine to a visually plain WinUI flow. It includes today's ordered
 list and approved editor fields, explicit Fixed/Flexible status, Start, both timer modes,
 transient focus controls, five-minute Landing, extension, completion, parking with a
 durable Context Capsule, explicit abandonment, bounded configurable Breaks, confirmed
-return, and explicit restart/suspension recovery.
+return, explicit restart/suspension/long-absence Recovery Mode, one deterministic
+same-day repair proposal with transactional acceptance and safe latest-repair undo,
+protected daily shutdown settings, durable work totals, explicit Shutdown, and a
+restart-safe resting state.
 
 The UI is not a general task manager and the DispatcherQueue refresh only requests Core
 projections and durability checkpoints; it never owns elapsed time. This phase does not
 add a background service, wellness recommendation engine, independent health clocks,
-exercise scoring, adaptive or additional focus modes, schedule repair, general session
-history, voice notes, attachments, recurrence, categories, dependencies, rich notes, AI,
-calendar integration, multi-day backlog, themes, custom icons, or visual polish.
+exercise scoring, adaptive or additional focus modes, optimizer-generated schedule
+alternatives, a visible buffer editor, general history UI, voice notes, attachments,
+recurrence, categories, dependencies, rich notes, AI, calendar integration, multi-day
+backlog, themes, custom icons, or visual polish.

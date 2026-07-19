@@ -29,6 +29,10 @@ public sealed partial class TodayPlanStore : IDisposable
             3,
             "context_capsules_and_break_recovery",
             "NowNext.App.Persistence.Migrations.0003_context_capsules_and_break_recovery.sql"),
+        new(
+            4,
+            "schedule_recovery_shutdown",
+            "NowNext.App.Persistence.Migrations.0004_schedule_recovery_shutdown.sql"),
     ];
 
     private readonly string _databasePath;
@@ -122,6 +126,7 @@ public sealed partial class TodayPlanStore : IDisposable
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
             await EnsurePlanExistsAsync(connection, transaction, planDate, cancellationToken);
+            await EnsureDayOpenAsync(connection, transaction, planDate, cancellationToken);
 
             if (await TaskRowExistsAsync(connection, transaction, task.Id, cancellationToken))
             {
@@ -140,6 +145,11 @@ public sealed partial class TodayPlanStore : IDisposable
                 planDate,
                 task.Id,
                 position,
+                cancellationToken);
+            await IncrementScheduleRevisionAsync(
+                connection,
+                transaction,
+                planDate,
                 cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
@@ -169,6 +179,8 @@ public sealed partial class TodayPlanStore : IDisposable
             await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
             await using SqliteTransaction transaction =
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            await EnsureDayOpenAsync(connection, transaction, planDate, cancellationToken);
 
             await EnsureScheduledTaskExistsAsync(
                 connection,
@@ -203,6 +215,12 @@ public sealed partial class TodayPlanStore : IDisposable
                 throw new InvalidOperationException($"Task ID '{task.Id}' could not be edited.");
             }
 
+            await IncrementScheduleRevisionAsync(
+                connection,
+                transaction,
+                planDate,
+                cancellationToken);
+
             await transaction.CommitAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -231,6 +249,8 @@ public sealed partial class TodayPlanStore : IDisposable
             await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
             await using SqliteTransaction transaction =
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            await EnsureDayOpenAsync(connection, transaction, planDate, cancellationToken);
 
             await EnsureNoUnresolvedSessionAsync(
                 connection,
@@ -263,6 +283,11 @@ public sealed partial class TodayPlanStore : IDisposable
                 taskId,
                 localNow.ToUniversalTime(),
                 cancellationToken);
+            await IncrementScheduleRevisionAsync(
+                connection,
+                transaction,
+                planDate,
+                cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
         }
@@ -291,6 +316,7 @@ public sealed partial class TodayPlanStore : IDisposable
             await using SqliteConnection connection = await OpenConnectionAsync(cancellationToken);
             await using SqliteTransaction transaction =
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await EnsureDayOpenAsync(connection, transaction, planDate, cancellationToken);
             IReadOnlyList<TaskId> currentTaskIds = await ReadScheduledTaskIdsAsync(
                 connection,
                 transaction,
@@ -318,6 +344,12 @@ public sealed partial class TodayPlanStore : IDisposable
                         cancellationToken);
                 }
             }
+
+            await IncrementScheduleRevisionAsync(
+                connection,
+                transaction,
+                planDate,
+                cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
         }
@@ -546,6 +578,54 @@ public sealed partial class TodayPlanStore : IDisposable
             """;
         command.Parameters.AddWithValue("$planDate", FormatDate(planDate));
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async System.Threading.Tasks.Task EnsureDayOpenAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        DateOnly planDate,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM day_closures
+                WHERE plan_date = $planDate
+            );
+            """;
+        command.Parameters.AddWithValue("$planDate", FormatDate(planDate));
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        if (Convert.ToInt32(result, CultureInfo.InvariantCulture) == 1)
+        {
+            throw new InvalidOperationException(
+                $"The workday '{FormatDate(planDate)}' is already closed.");
+        }
+    }
+
+    private static async System.Threading.Tasks.Task IncrementScheduleRevisionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        DateOnly planDate,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            UPDATE today_plans
+            SET schedule_revision = schedule_revision + 1
+            WHERE plan_date = $planDate;
+            """;
+        command.Parameters.AddWithValue("$planDate", FormatDate(planDate));
+        int affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (affectedRows != 1)
+        {
+            throw new InvalidOperationException(
+                $"Today plan '{FormatDate(planDate)}' has no revision row.");
+        }
     }
 
     private static async System.Threading.Tasks.Task<bool> TaskRowExistsAsync(

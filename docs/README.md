@@ -32,6 +32,8 @@ approved subject to Windows Reduced Motion accessibility behavior.
   planning and the minimal authoritative Focus experience.
 - [Prompt 6 Context and Break plan](plans/prompt-6-context-break-journey.md) — durable
   parking context, bounded Breaks, and confirmed return.
+- [Prompt 7 repair, Recovery, and Shutdown plan](plans/prompt-7-schedule-recovery-shutdown.md)
+  — deterministic repair, durable workday decisions, and verification record.
 - [Timer invariants](timer-invariants.md) — authoritative elapsed-time, transition,
   boundary, and recovery rules.
 - [SQLite schema](sqlite-schema.md) — current migration and retention contract.
@@ -40,10 +42,14 @@ approved subject to Windows Reduced Motion accessibility behavior.
   input, recovery, and accessibility checks that are not reliable in the CLI test host.
 - [Prompt 6 manual test script](testing/prompt-6-manual-test-script.md) — Landing, Park,
   Context Capsule, Break, restart, and return-confirmation checks.
+- [Prompt 7 manual test script](testing/prompt-7-manual-test-script.md) — protected
+  repair, late Recovery, Shutdown, resting-state, and accessibility checks.
 
 ## Current phase
 
 The current vertical slice connects the Today model, App-owned SQLite storage, and
 authoritative session engine to plain Today, Focus, and Break screens. It durably retains
-parking context and never starts returned work without confirmation. Schedule repair,
-general session history, visual polish, and deferred features remain unimplemented.
+parking context, provides one deterministic same-day repair, recovers from substantial
+absence without invented time, and persists explicit Shutdown. General history UI,
+multi-day planning, optimizer menus, visual polish, and deferred features remain
+unimplemented.
