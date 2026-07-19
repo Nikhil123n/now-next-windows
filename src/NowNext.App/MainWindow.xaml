@@ -13,6 +13,8 @@
             Padding="32">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -43,9 +45,74 @@
                     MinWidth="112" />
             </Grid>
 
+            <StackPanel
+                x:Name="DayControls"
+                Grid.Row="1"
+                Margin="0,20,0,0"
+                Orientation="Horizontal"
+                Spacing="12">
+                <TimePicker
+                    x:Name="ShutdownTimeInput"
+                    AutomationProperties.Name="Protected shutdown time"
+                    Header="Protected shutdown"
+                    MinWidth="176" />
+                <ComboBox
+                    x:Name="DailyWinInput"
+                    AutomationProperties.Name="Optional Daily Win"
+                    Header="Daily Win (optional)"
+                    MinWidth="240" />
+                <Button
+                    x:Name="SaveDaySettingsButton"
+                    AutomationProperties.Name="Save protected day settings"
+                    Click="OnSaveDaySettingsClick"
+                    Content="Save day settings"
+                    MinHeight="44"
+                    VerticalAlignment="Bottom" />
+                <Button
+                    x:Name="ReviewRepairButton"
+                    AutomationProperties.Name="Review one recommended schedule repair"
+                    Click="OnReviewRepairClick"
+                    Content="Review repair"
+                    MinHeight="44"
+                    VerticalAlignment="Bottom" />
+                <Button
+                    x:Name="UndoRepairButton"
+                    AutomationProperties.Name="Undo the latest accepted repair"
+                    Click="OnUndoRepairClick"
+                    Content="Undo repair"
+                    MinHeight="44"
+                    VerticalAlignment="Bottom" />
+                <Button
+                    x:Name="ShutdownButton"
+                    AutomationProperties.Name="Review and close the workday"
+                    Click="OnShutdownClick"
+                    Content="Shutdown"
+                    MinHeight="44"
+                    VerticalAlignment="Bottom" />
+            </StackPanel>
+
+            <Border
+                x:Name="RepairCallout"
+                Grid.Row="2"
+                Margin="0,12,0,0"
+                Padding="12"
+                AutomationProperties.Name="Schedule repair needs review"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                CornerRadius="8"
+                Visibility="Collapsed">
+                <StackPanel Spacing="4">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Text="The remaining day needs one review." />
+                    <TextBlock
+                        x:Name="RepairCalloutText"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
             <ListView
                 x:Name="TodayTaskList"
-                Grid.Row="1"
+                Grid.Row="3"
                 Margin="0,24,0,16"
                 AutomationProperties.Name="Today's chronological tasks"
                 ItemsSource="{x:Bind TodayItems, Mode=OneWay}"
@@ -126,7 +193,7 @@
 
             <StackPanel
                 x:Name="EmptyTodayPanel"
-                Grid.Row="1"
+                Grid.Row="3"
                 HorizontalAlignment="Center"
                 IsHitTestVisible="False"
                 Spacing="8"
@@ -143,7 +210,7 @@
 
             <TextBlock
                 x:Name="StatusText"
-                Grid.Row="2"
+                Grid.Row="4"
                 AutomationProperties.LiveSetting="Polite"
                 MinHeight="24"
                 TextWrapping="Wrap" />
@@ -312,13 +379,21 @@
                     <TextBlock
                         Text="Saved focused time is intact. Resume without the time away, or explicitly include a known amount."
                         TextWrapping="Wrap" />
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="8">
-                        <Button
-                            Click="OnResumeWithoutAwayClick"
-                            Content="Resume — exclude time away"
-                            MinHeight="44" />
+                    <TextBlock
+                        x:Name="RecoveryNextFixedText"
+                        FontWeight="SemiBold"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="RecoveryAvailableTimeText"
+                        TextWrapping="Wrap" />
+                    <Button
+                        x:Name="RecoveryResumeButton"
+                        AutomationProperties.Name="Resume committed work and exclude time away"
+                        Click="OnResumeWithoutAwayClick"
+                        Content="Resume — exclude time away"
+                        HorizontalAlignment="Stretch"
+                        MinHeight="44" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
                         <NumberBox
                             x:Name="IncludedAwayMinutes"
                             AutomationProperties.Name="Minutes away to include as focused time"
@@ -328,18 +403,34 @@
                             Value="0"
                             Width="150" />
                         <Button
+                            x:Name="RecoveryIncludeButton"
+                            AutomationProperties.Name="Explicitly include time away and resume"
                             Click="OnResumeIncludingAwayClick"
                             Content="Include and resume"
-                            MinHeight="44" />
-                        <Button
-                            Click="OnFinishClick"
-                            Content="Done"
-                            MinHeight="44" />
-                        <Button
-                            Click="OnParkClick"
-                            Content="Park"
+                            HorizontalAlignment="Stretch"
                             MinHeight="44" />
                     </StackPanel>
+                    <Button
+                        x:Name="RecoveryRebuildButton"
+                        AutomationProperties.Name="Review one repair for the remaining day"
+                        Click="OnRecoveryRebuildClick"
+                        Content="Rebuild remaining day"
+                        HorizontalAlignment="Stretch"
+                        MinHeight="44" />
+                    <Button
+                        x:Name="RecoveryEndButton"
+                        AutomationProperties.Name="Resolve the interrupted session"
+                        Click="OnRecoveryEndClick"
+                        Content="End interrupted session"
+                        HorizontalAlignment="Stretch"
+                        MinHeight="44" />
+                    <Button
+                        x:Name="RecoveryCloseEarlyButton"
+                        AutomationProperties.Name="Resolve focus and close work early"
+                        Click="OnRecoveryCloseEarlyClick"
+                        Content="Close work early"
+                        HorizontalAlignment="Stretch"
+                        MinHeight="44" />
                     <TextBlock
                         x:Name="RecoveryError"
                         AutomationProperties.LiveSetting="Assertive"
@@ -473,6 +564,30 @@
             </Border>
         </Grid>
 
+        <Grid
+            x:Name="RestingScreen"
+            Padding="48"
+            AutomationProperties.Name="Workday closed"
+            Visibility="Collapsed">
+            <StackPanel
+                HorizontalAlignment="Center"
+                MaxWidth="720"
+                Spacing="16"
+                VerticalAlignment="Center">
+                <TextBlock
+                    FontSize="32"
+                    FontWeight="SemiBold"
+                    Text="Workday closed" />
+                <TextBlock
+                    x:Name="RestingSummaryText"
+                    FontSize="18"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Text="NOW/NEXT is resting. No task or schedule changes will be made for this closed day."
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+
         <ContentDialog
             x:Name="TaskEditorDialog"
             CloseButtonText="Cancel"
@@ -557,6 +672,12 @@
                             <ComboBoxItem Content="Important" />
                         </ComboBox>
                     </Grid>
+                    <CheckBox
+                        x:Name="FixedUnlockConfirmation"
+                        AutomationProperties.Name="Confirm an explicit change to a protected Fixed commitment"
+                        Content="I explicitly approve moving or unlocking this Fixed commitment."
+                        IsChecked="False"
+                        MinHeight="44" />
                 </StackPanel>
             </ScrollViewer>
         </ContentDialog>

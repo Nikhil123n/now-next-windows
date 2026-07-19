@@ -2,6 +2,7 @@ using System.Reflection;
 using NowNext.App;
 using NowNext.App.Persistence;
 using NowNext.Core.Domain;
+using NowNext.Core.Planning;
 using NowNext.Core.Sessions;
 using DomainTask = NowNext.Core.Domain.Task;
 
@@ -255,6 +256,166 @@ public sealed class FocusSessionRuntimeTests
         Assert.AreEqual(runtime.Current.Id, capsule.SessionId);
         Assert.AreEqual("Open the next reviewer comment", capsule.NextPhysicalAction);
         Assert.AreEqual("The first comment is already resolved.", capsule.Note);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task SubstantialAbsenceReloadPreservesLastDurableCheckpoint()
+    {
+        using var database = new TestDatabase();
+        var clock = new ManualTimeProvider(InitialUtc);
+        DomainTask task = TestTaskFactory.Create(plannedDuration: TimeSpan.FromMinutes(30));
+        using var store = new TodayPlanStore(database.DatabasePath, clock);
+        await store.CreateTaskAsync(task, _testContext.CancellationToken);
+        using var runtime = new FocusSessionRuntime(store, clock);
+        await runtime.InitializeAsync(_testContext.CancellationToken);
+        await runtime.CreateAsync(
+            new SessionId(Guid.NewGuid()),
+            task.Id,
+            task.TimingMode,
+            task.PlannedDuration,
+            _testContext.CancellationToken);
+        await runtime.ExecuteAsync(new StartSession(), _testContext.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(3));
+        await runtime.ExecuteAsync(new RefreshSession(), _testContext.CancellationToken);
+
+        clock.AdvanceMonotonic(TimeSpan.FromMinutes(15));
+        clock.AdjustUtc(TimeSpan.FromHours(-8));
+        await runtime.ReloadForSubstantialAbsenceAsync(_testContext.CancellationToken);
+
+        RecoveryRequiredSessionState recovery =
+            Assert.IsInstanceOfType<RecoveryRequiredSessionState>(runtime.Current!.State);
+        Assert.AreEqual(ActiveSessionPhase.Focusing, recovery.InterruptedPhase);
+        Assert.AreEqual(TimeSpan.FromMinutes(3), runtime.Current.CommittedActiveDuration);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task CloseDayReleasesKeepAwakeOnlyAfterDurableClosure()
+    {
+        using var database = new TestDatabase();
+        var clock = new ManualTimeProvider(InitialUtc);
+        DomainTask task = TestTaskFactory.Create();
+        using var store = new TodayPlanStore(database.DatabasePath, clock);
+        await store.CreateTaskAsync(task, _testContext.CancellationToken);
+        await store.SaveDaySettingsAsync(
+            new DaySettings(new DateOnly(2026, 7, 18), new TimeOnly(17, 0)),
+            _testContext.CancellationToken);
+        using var runtime = new FocusSessionRuntime(store, clock);
+        await runtime.InitializeAsync(_testContext.CancellationToken);
+        await runtime.CreateAsync(
+            new SessionId(Guid.NewGuid()),
+            task.Id,
+            task.TimingMode,
+            task.PlannedDuration,
+            _testContext.CancellationToken);
+        ShutdownSummary summary = await store.CreateShutdownSummaryAsync(
+            _testContext.CancellationToken);
+        var controller = new ObservingKeepAwakeController(database.DatabasePath);
+
+        await runtime.CloseDayAsync(summary, controller, _testContext.CancellationToken);
+
+        Assert.IsTrue(controller.Released);
+        Assert.IsTrue(controller.SawDurableClosure);
+        Assert.IsInstanceOfType<DayClosedSessionState>(runtime.Current!.State);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task CloseDayPersistenceFailureDoesNotReleaseKeepAwake()
+    {
+        using var database = new TestDatabase();
+        var clock = new ManualTimeProvider(InitialUtc);
+        DomainTask task = TestTaskFactory.Create();
+        using var store = new TodayPlanStore(database.DatabasePath, clock);
+        await store.CreateTaskAsync(task, _testContext.CancellationToken);
+        await store.SaveDaySettingsAsync(
+            new DaySettings(new DateOnly(2026, 7, 18), new TimeOnly(17, 0)),
+            _testContext.CancellationToken);
+        ShutdownSummary summary = await store.CreateShutdownSummaryAsync(
+            _testContext.CancellationToken);
+        await store.CloseDayAsync(summary, cancellationToken: _testContext.CancellationToken);
+        using var runtime = new FocusSessionRuntime(store, clock);
+        await runtime.InitializeAsync(_testContext.CancellationToken);
+        var controller = new ObservingKeepAwakeController(database.DatabasePath);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            async () => await runtime.CloseDayAsync(
+                summary,
+                controller,
+                _testContext.CancellationToken));
+
+        Assert.IsFalse(controller.Released);
+    }
+
+    [TestMethod]
+    [Timeout(10_000, CooperativeCancellation = true)]
+    public async System.Threading.Tasks.Task KeepAwakeReleaseFailureDoesNotReopenPersistedDay()
+    {
+        using var database = new TestDatabase();
+        var clock = new ManualTimeProvider(InitialUtc);
+        DomainTask task = TestTaskFactory.Create();
+        using var store = new TodayPlanStore(database.DatabasePath, clock);
+        await store.CreateTaskAsync(task, _testContext.CancellationToken);
+        await store.SaveDaySettingsAsync(
+            new DaySettings(new DateOnly(2026, 7, 18), new TimeOnly(17, 0)),
+            _testContext.CancellationToken);
+        using var runtime = new FocusSessionRuntime(store, clock);
+        await runtime.InitializeAsync(_testContext.CancellationToken);
+        ShutdownSummary summary = await store.CreateShutdownSummaryAsync(
+            _testContext.CancellationToken);
+        var controller = new ObservingKeepAwakeController(
+            database.DatabasePath,
+            throwOnRelease: true);
+
+        DayClosure closure = await runtime.CloseDayAsync(
+            summary,
+            controller,
+            _testContext.CancellationToken);
+
+        Assert.IsTrue(controller.Released);
+        Assert.AreEqual(summary.Date, closure.Date);
+        Assert.IsNotNull(await store.LoadDayClosureAsync(_testContext.CancellationToken));
+    }
+
+    private sealed class ObservingKeepAwakeController : IKeepAwakeController
+    {
+        private readonly string _databasePath;
+        private readonly bool _throwOnRelease;
+
+        internal ObservingKeepAwakeController(
+            string databasePath,
+            bool throwOnRelease = false)
+        {
+            _databasePath = databasePath;
+            _throwOnRelease = throwOnRelease;
+        }
+
+        internal bool Released { get; private set; }
+
+        internal bool SawDurableClosure { get; private set; }
+
+        public void Release()
+        {
+            Released = true;
+            if (_throwOnRelease)
+            {
+                throw new InvalidOperationException("Simulated keep-awake release failure.");
+            }
+
+            using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                {
+                    DataSource = _databasePath,
+                    Pooling = false,
+                }.ToString());
+            connection.Open();
+            using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM day_closures;";
+            SawDurableClosure = Convert.ToInt64(
+                command.ExecuteScalar(),
+                System.Globalization.CultureInfo.InvariantCulture) == 1;
+        }
     }
 
 }

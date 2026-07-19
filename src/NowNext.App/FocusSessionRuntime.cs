@@ -1,5 +1,6 @@
 using NowNext.App.Persistence;
 using NowNext.Core.Domain;
+using NowNext.Core.Planning;
 using NowNext.Core.Sessions;
 
 namespace NowNext.App;
@@ -156,6 +157,83 @@ public sealed class FocusSessionRuntime : IDisposable
         CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+    }
+
+    public async System.Threading.Tasks.Task ReloadForSubstantialAbsenceAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        await _operationGate.WaitAsync(cancellationToken);
+        try
+        {
+            SessionCheckpoint? checkpoint = await _store.LoadCurrentSessionAsync(cancellationToken);
+            if (checkpoint is null)
+            {
+                return;
+            }
+
+            Volatile.Write(
+                ref _current,
+                FocusSessionMachine.Restore(checkpoint, _timeProvider));
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    public async System.Threading.Tasks.Task<DayClosure> CloseDayAsync(
+        ShutdownSummary summary,
+        IKeepAwakeController keepAwakeController,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(summary);
+        ArgumentNullException.ThrowIfNull(keepAwakeController);
+        await _operationGate.WaitAsync(cancellationToken);
+        try
+        {
+            FocusSession? current = Volatile.Read(ref _current);
+            FocusSession? closedSession = current;
+            SessionCheckpoint? checkpoint = null;
+            if (current?.State is not AbandonedSessionState)
+            {
+                if (current is not null)
+                {
+                    closedSession = FocusSessionMachine.Apply(
+                        current,
+                        new CloseDay(),
+                        _timeProvider).Session;
+                    checkpoint = FocusSessionMachine.CreateCheckpoint(
+                        closedSession,
+                        _timeProvider);
+                }
+            }
+
+            DayClosure closure = await _store.CloseDayAsync(
+                summary,
+                checkpoint,
+                cancellationToken);
+            Volatile.Write(ref _current, closedSession);
+            try
+            {
+                keepAwakeController.Release();
+            }
+            catch (InvalidOperationException)
+            {
+                // The persisted closure remains authoritative if Windows rejects release.
+            }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                // The persisted closure remains authoritative if Windows rejects release.
+            }
+
+            return closure;
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     public void Dispose()

@@ -1,6 +1,6 @@
 # Timer and Session Invariants
 
-This document defines the authoritative timing and recovery contract through Prompt 6.
+This document defines the authoritative timing and recovery contract through Prompt 7.
 It is a behavioral companion to
 [ADR 0002](decisions/0002-authoritative-time-and-recovery.md) and does not authorize
 unrelated timer, health, or automation features.
@@ -13,6 +13,9 @@ unrelated timer, health, or automation features.
   live elapsed duration.
 - A UI refresh asks for a projection. It does not add a tick. Delayed, skipped, or
   repeated rendering cannot change authoritative elapsed time.
+- The App measures foreground refresh gaps with monotonic time. A gap of at least 15
+  minutes reloads the last durable checkpoint as RecoveryRequired; the unobserved tail
+  is excluded. Shorter render delays use the ordinary monotonic projection.
 - Paused, limit-decision, Break-completed, completed, parked, abandoned,
   recovery-required, and day-closed states do not accrue time.
 - Break elapsed is separate and never contributes to focused time.
@@ -128,6 +131,10 @@ timestamps. It never persists a monotonic anchor for another process.
 - Break limit, selected prompt, retained outcome, and parked next action survive restart.
 - Identity, mode, original duration, and committed durations survive a new monotonic
   origin.
+- Recovery presents the interrupted task, next unfinished Fixed commitment, and
+  nonnegative available time before that commitment or shutdown. Resume excluding away,
+  explicit bounded inclusion, rebuild proposal, explicit task outcome, and close-early
+  are decisions; none starts or ends work automatically.
 
 ## Commit and concurrency rules
 
@@ -142,3 +149,8 @@ timestamps. It never persists a monotonic anchor for another process.
   gate. Persistence delay cannot move the interruption boundary and invent focused time.
 - Reapplying a boundary observation or restoration decision cannot double-count duration,
   repeat a cue, or mutate a terminal state.
+- Every checkpoint upserts the retained session ledger in the same transaction. Shutdown
+  sums committed active duration across sessions, including Landing and excluding Break.
+- Any final DayClosed checkpoint, ledger update, and closure summary commit before the
+  runtime publishes closure. Keep-awake release occurs afterward; its failure does not
+  delete or reopen the persisted day.

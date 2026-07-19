@@ -9,6 +9,7 @@ public partial class App : Application, IDisposable
     private Window? _window;
     private TodayPlanStore? _store;
     private FocusSessionRuntime? _sessionRuntime;
+    private IKeepAwakeController? _keepAwakeController;
     private bool _disposed;
 
     public App()
@@ -26,8 +27,9 @@ public partial class App : Application, IDisposable
             await _store.InitializeAsync();
             _sessionRuntime = new FocusSessionRuntime(_store);
             await _sessionRuntime.InitializeAsync();
+            _keepAwakeController = new NoOpKeepAwakeController();
             PowerManager.SystemSuspendStatusChanged += OnSystemSuspendStatusChanged;
-            _window = new MainWindow(_store, _sessionRuntime);
+            _window = new MainWindow(_store, _sessionRuntime, _keepAwakeController);
         }
         catch (Exception exception) when (
             exception is TodayPlanStorageException or InvalidDataException)
@@ -87,6 +89,7 @@ public partial class App : Application, IDisposable
         _sessionRuntime?.Dispose();
         _store?.Dispose();
         _sessionRuntime = null;
+        _keepAwakeController = null;
         _store = null;
         _window = null;
         _disposed = true;

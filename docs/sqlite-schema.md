@@ -1,10 +1,11 @@
 # SQLite Schema
 
-The current schema has three ordered versions. Prompt 3 introduced version 1 for the
+The current schema has four ordered versions. Prompt 3 introduced version 1 for the
 current local working day. Prompt 4 preserves that migration and adds version 2 for one
 durable current focus-session checkpoint. Prompt 6 adds version 3 for bounded Break
-recovery, Context Capsules, and the local Break default; it does not add general session
-history.
+recovery, Context Capsules, and the local Break default. Prompt 7 adds version 4 for
+protected day settings, schedule revisions, retained focus totals, repair acceptance/
+undo, and durable closure; it does not add a general history view.
 
 The authoritative version 1 migration is
 [`0001_initial_today_plan.sql`](../src/NowNext.App/Persistence/Migrations/0001_initial_today_plan.sql).
@@ -12,6 +13,8 @@ The authoritative version 2 migration is
 [`0002_current_focus_session_checkpoint.sql`](../src/NowNext.App/Persistence/Migrations/0002_current_focus_session_checkpoint.sql).
 The authoritative version 3 migration is
 [`0003_context_capsules_and_break_recovery.sql`](../src/NowNext.App/Persistence/Migrations/0003_context_capsules_and_break_recovery.sql).
+The authoritative version 4 migration is
+[`0004_schedule_recovery_shutdown.sql`](../src/NowNext.App/Persistence/Migrations/0004_schedule_recovery_shutdown.sql).
 Once committed to `main`, a migration must not be edited; later changes use a new ordered
 migration.
 
@@ -88,11 +91,44 @@ optional nonblank user-selected movement. Absence of the row means the product d
 five minutes. It is local presentation configuration, not an independent timer or health
 tracking model.
 
+## Version 4 schedule repair, ledger, and closure
+
+Version 4 adds a nonnegative `today_plans.schedule_revision`. Create, edit, delete,
+reorder, lifecycle, day-setting, accepted-repair, and undo mutations increment it.
+`day_settings` stores the explicitly selected shutdown and optional Daily Win for one
+plan date. There is no implicit shutdown row or hidden default. The Daily Win and every
+other retained task reference use `ON DELETE RESTRICT`.
+
+`focus_session_records` retains one latest durable record per session. It stores plan and
+task identity, timer mode, original/approved limits, committed active duration, Landing
+and Break durations, durable state, and UTC start/end/checkpoint metadata. Saving the
+current checkpoint updates this ledger in the same transaction. Migration 4 backfills
+the existing singleton checkpoint by joining its retained task to its schedule entry.
+Shutdown totals committed active duration, which includes Landing and excludes the
+separate Break counter. These records support current totals and recovery; no history
+screen is exposed.
+
+`schedule_repairs` stores accepted proposal headers: trigger and observation, optional
+extension, base revision, protected shutdown, total consumed buffer, revised finish, and
+accept/undo timestamps. `schedule_repair_changes` records ordered before/after task
+start, lifecycle, and position values. `schedule_repair_protections` retains every Fixed
+interval used in the explanation. Acceptance requires the exact current revision and
+shutdown and writes all changes/audit rows in one transaction. Undo selects only the
+latest same-day non-undone repair and succeeds only when all affected values still equal
+the recorded accepted result.
+
+`day_closures` stores one confirmed closure per plan date with UTC closure time, planned
+and actual totals, Daily Win result, and the selected most-important unfinished task and
+next action. `day_closure_items` retains completed and deliberately deferred task totals.
+After closure, production task/session/settings/repair mutations for that date fail.
+Closure and any final DayClosed session checkpoint/ledger update commit together before
+keep-awake release is requested.
+
 ## Migration safety
 
 Initialization creates the migration registry and applies missing migrations in order in
 one transaction. Unknown, renamed, or non-contiguous applied versions stop initialization.
 A DDL conflict rolls back both the failed migration and the registry change. Tests cover
-fresh version 0 to version 3, retained versions 1 and 2 to version 3, repeat
-initialization, rollback, future versions, checkpoint/task/capsule foreign keys, and
-corrupt checkpoint or capsule data.
+fresh version 0 to version 4, retained versions 1, 2, and 3 to version 4, checkpoint
+backfill, repeat initialization, rollback, future versions, schema constraints,
+checkpoint/task/capsule/repair foreign keys, and corrupt checkpoint or capsule data.

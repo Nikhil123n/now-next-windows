@@ -28,6 +28,15 @@ The known WinUI generated-file workspace diagnostic is informational only when
   suspension/recovery, and bounded explicit inclusion of away time without timing sleeps.
 - Atomic Park-plus-Context-Capsule storage, capsule retention, Break defaults, version 3
   migration upgrades/rollback, Break restart, and corrupt-data handling.
+- Deterministic buffer use, Flexible movement across Fixed anchors, one-task deferral,
+  impossible repair results, fixed-seed Fixed/shutdown protection, stale acceptance,
+  transactional apply/cancellation/undo, and stale undo rejection.
+- Version 4 upgrades from every retained baseline, checkpoint-ledger backfill, schedule
+  revision constraints, retained multi-session totals, durable closure, post-closure
+  mutation rejection, and keep-awake release ordering/failure behavior.
+- Recovery next-Fixed/available-time projections, the exact 15-minute substantial-
+  absence contract, durable-time reload under UTC changes, Shutdown ranking, Daily Win
+  states, and Landing-in/Break-out totals.
 - Task-editor validation, timer-text formatting from authoritative `SessionView` values,
   legal focus-control policy, and Focus/Break recovery affordances.
 - A static WinUI contract check that normal Focus content contains the label and segmented
@@ -37,6 +46,9 @@ The known WinUI generated-file workspace diagnostic is informational only when
 - A static Break contract check that the surface starts collapsed, renders exactly one
   prompt, delays return context until the final portion, has no progress bar, and uses
   44-pixel minimum action targets.
+- A static Prompt 7 contract check that Today exposes one calm proposal, Recovery choices
+  appear in deliberate order with accessible 44-pixel targets, Shutdown defaults to no
+  mutation until confirmation, and no red overdue-task wall is present.
 
 SQLite tests use unique temporary database paths and never access the packaged user's
 LocalState. WinUI controls are not instantiated in the MTP test process because the
@@ -45,7 +57,10 @@ test harness.
 
 ## Windows UI verification
 
-Run the [Prompt 6 manual test script](prompt-6-manual-test-script.md) on Windows 11 for
+Run the [Prompt 7 manual test script](prompt-7-manual-test-script.md) on Windows 11 for
+repair review/accept/undo, protected Fixed/shutdown changes, late Recovery, explicit
+outcomes, close-early, durable Shutdown, and the resting state. Run the
+[Prompt 6 manual test script](prompt-6-manual-test-script.md) for
 packaged launch, CRUD/reordering, full-screen layout, keyboard and touch paths, transient
 controls, exact user-visible timer behavior, Landing/Park/Break/return, restart recovery,
 high contrast, text scaling, and Reduced Motion. The
@@ -53,7 +68,7 @@ high contrast, text scaling, and Reduced Motion. The
 Hardware suspend/Modern Standby remains a manual integration check and does not justify a
 background service.
 
-Later P0 milestones must add deterministic schedule repair, Fixed/shutdown protection,
-approval/undo, and general history. Prototype
-success still requires 10–14 real working days without lost state, invented time, silent
-Fixed movement, or cloud availability.
+Later P0 milestones may expose deliberately approved general history and Windows
+integration without changing these repair/recovery invariants. Prototype success still
+requires 10–14 real working days without lost state, invented time, silent Fixed
+movement, or cloud availability.

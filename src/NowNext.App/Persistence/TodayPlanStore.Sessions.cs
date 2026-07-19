@@ -51,6 +51,7 @@ public sealed partial class TodayPlanStore
             await using SqliteTransaction transaction =
                 (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
+            await EnsureDayOpenAsync(connection, transaction, planDate, cancellationToken);
             await EnsureScheduledTaskExistsAsync(
                 connection,
                 transaction,
@@ -67,7 +68,13 @@ public sealed partial class TodayPlanStore
                 transaction,
                 checkpoint,
                 cancellationToken);
-            await UpdateTaskFromSessionAsync(
+            await UpsertFocusSessionRecordAsync(
+                connection,
+                transaction,
+                planDate,
+                checkpoint,
+                cancellationToken);
+            bool scheduleChanged = await UpdateTaskFromSessionAsync(
                 connection,
                 transaction,
                 checkpoint,
@@ -78,6 +85,15 @@ public sealed partial class TodayPlanStore
                     connection,
                     transaction,
                     contextCapsule,
+                    cancellationToken);
+            }
+
+            if (scheduleChanged)
+            {
+                await IncrementScheduleRevisionAsync(
+                    connection,
+                    transaction,
+                    planDate,
                     cancellationToken);
             }
 
@@ -284,7 +300,85 @@ public sealed partial class TodayPlanStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async System.Threading.Tasks.Task UpdateTaskFromSessionAsync(
+    private static async System.Threading.Tasks.Task UpsertFocusSessionRecordAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        DateOnly planDate,
+        SessionCheckpoint checkpoint,
+        CancellationToken cancellationToken)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            INSERT INTO focus_session_records(
+                session_id,
+                plan_date,
+                task_id,
+                timing_mode,
+                original_planned_duration_ticks,
+                approved_limit_ticks,
+                committed_active_ticks,
+                landing_ticks,
+                break_ticks,
+                session_state,
+                started_at_utc,
+                ended_at_utc,
+                checkpointed_at_utc)
+            VALUES (
+                $sessionId,
+                $planDate,
+                $taskId,
+                $timingMode,
+                $originalPlannedDurationTicks,
+                $approvedLimitTicks,
+                $committedActiveTicks,
+                $landingTicks,
+                $breakTicks,
+                $sessionState,
+                $startedAtUtc,
+                $endedAtUtc,
+                $checkpointedAtUtc)
+            ON CONFLICT(session_id) DO UPDATE SET
+                task_id = excluded.task_id,
+                timing_mode = excluded.timing_mode,
+                original_planned_duration_ticks = excluded.original_planned_duration_ticks,
+                approved_limit_ticks = excluded.approved_limit_ticks,
+                committed_active_ticks = excluded.committed_active_ticks,
+                landing_ticks = excluded.landing_ticks,
+                break_ticks = excluded.break_ticks,
+                session_state = excluded.session_state,
+                started_at_utc = excluded.started_at_utc,
+                ended_at_utc = excluded.ended_at_utc,
+                checkpointed_at_utc = excluded.checkpointed_at_utc;
+            """;
+        command.Parameters.AddWithValue("$sessionId", FormatSessionId(checkpoint.Id));
+        command.Parameters.AddWithValue("$planDate", FormatDate(planDate));
+        command.Parameters.AddWithValue("$taskId", FormatTaskId(checkpoint.TaskId));
+        command.Parameters.AddWithValue("$timingMode", checkpoint.TimingMode.ToString());
+        command.Parameters.AddWithValue(
+            "$originalPlannedDurationTicks",
+            checkpoint.OriginalPlannedDuration.Ticks);
+        command.Parameters.AddWithValue("$approvedLimitTicks", checkpoint.ApprovedLimit.Ticks);
+        command.Parameters.AddWithValue(
+            "$committedActiveTicks",
+            checkpoint.CommittedActiveDuration.Ticks);
+        command.Parameters.AddWithValue("$landingTicks", checkpoint.LandingDuration.Ticks);
+        command.Parameters.AddWithValue("$breakTicks", checkpoint.BreakDuration.Ticks);
+        command.Parameters.AddWithValue("$sessionState", checkpoint.State.ToString());
+        AddNullableTimestampParameter(command, "$startedAtUtc", checkpoint.StartedAtUtc);
+        DateTimeOffset? endedAtUtc = checkpoint.CompletedAtUtc
+            ?? checkpoint.ParkedAtUtc
+            ?? checkpoint.AbandonedAtUtc
+            ?? checkpoint.DayClosedAtUtc;
+        AddNullableTimestampParameter(command, "$endedAtUtc", endedAtUtc);
+        command.Parameters.AddWithValue(
+            "$checkpointedAtUtc",
+            FormatTimestamp(checkpoint.CheckpointedAtUtc));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async System.Threading.Tasks.Task<bool> UpdateTaskFromSessionAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         SessionCheckpoint checkpoint,
@@ -304,7 +398,11 @@ public sealed partial class TodayPlanStore
                     ELSE next_physical_action
                 END
             WHERE task_id = $taskId
-              AND deleted_at_utc IS NULL;
+              AND deleted_at_utc IS NULL
+              AND (
+                  task_state <> $taskState
+                  OR ($updateNextAction = 1
+                      AND next_physical_action IS NOT $nextPhysicalAction));
             """;
         command.Parameters.AddWithValue("$taskState", taskState.ToString());
         command.Parameters.AddWithValue("$updateNextAction", updateNextAction ? 1 : 0);
@@ -313,11 +411,7 @@ public sealed partial class TodayPlanStore
             (object?)checkpoint.ParkedNextPhysicalAction ?? DBNull.Value);
         command.Parameters.AddWithValue("$taskId", FormatTaskId(checkpoint.TaskId));
         int affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
-        if (affectedRows != 1)
-        {
-            throw new InvalidOperationException(
-                $"Task ID '{checkpoint.TaskId}' could not be updated for the current session.");
-        }
+        return affectedRows == 1;
     }
 
     private static TaskState GetTaskState(SessionCheckpoint checkpoint)

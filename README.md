@@ -3,7 +3,8 @@
 NOW/NEXT is a private, local-only Windows 11 day-planning and focus application for one
 user on one Surface. This repository is the new source of truth and currently contains
 the Today domain and local SQLite foundation, the authoritative focus-session and
-recovery engine, and a plain runnable Today-to-Focus-to-Break vertical slice.
+recovery engine, deterministic same-day repair, durable Shutdown, and a plain runnable
+Today-to-Focus-to-Break vertical slice.
 
 Start with [AGENTS.md](AGENTS.md), then read [PRODUCT.md](PRODUCT.md),
 [SCOPE.md](SCOPE.md), [ARCHITECTURE.md](ARCHITECTURE.md), the authoritative
@@ -34,7 +35,8 @@ dotnet run --project .\src\NowNext.App\NowNext.App.csproj --configuration Releas
 - Today domain: immutable task values and validated single-day ordering.
 - Local persistence: versioned App-owned SQLite for today's create, edit, soft delete,
   reorder, and load operations, plus a durable current-session checkpoint, Context
-  Capsules, and Break defaults.
+  Capsules, Break defaults, schedule revisions, retained session totals, accepted repair
+  audit/undo, and day closure.
 - Focus sessions: pure Core transitions for both timer modes, limits, overtime, Landing,
   extension, completion, parking, explicit abandonment, bounded Break, recovery, and day
   closure. Elapsed work comes from monotonic time rather than UI refreshes.
@@ -42,10 +44,11 @@ dotnet run --project .\src\NowNext.App\NowNext.App.csproj --configuration Releas
   ordering, and Start. The full-screen Focus view uses the authoritative engine for both
   timer modes, transient controls, overtime, Landing, extension, parking, completion,
   explicit restart/suspension recovery, atomic Context Capsule saving, one-prompt Breaks,
-  and confirmed return without automatic task switching.
+  confirmed return without automatic task switching, one explained repair proposal,
+  15-minute absence Recovery Mode, explicit Shutdown, and a restart-safe resting state.
 - UI automation: deterministic presentation contracts are tested in MSTest; the
   interaction and Windows accessibility cases are recorded in the
-  [Prompt 6 manual test script](docs/testing/prompt-6-manual-test-script.md).
+  [Prompt 7 manual test script](docs/testing/prompt-7-manual-test-script.md).
 - License: proprietary; see [LICENSE](LICENSE).
 
 See [the documentation index](docs/README.md) and [contribution guide](CONTRIBUTING.md)

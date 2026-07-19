@@ -26,9 +26,10 @@ Motion calls for a static colon.
 - The focus view normally contains only the focus label and timer.
 - The current vertical slice includes plain Today planning and the minimal Focus view on
   top of the authoritative Core session engine, durable Context Capsules, bounded Breaks,
-  and recovery checkpoints.
-- Do not infer permission for visual polish, background services, schedule repair,
-  general session history, wellness engines, or another focus mode from this slice.
+  recovery checkpoints, deterministic same-day repair, and durable Shutdown.
+- Do not infer permission for visual polish, background services, optimizer menus,
+  general history UI, wellness engines, multi-day planning, or another focus mode from
+  this slice.
 
 ## Approved implementation shape
 
